@@ -130,6 +130,7 @@ export function buildTerrainMesh(THREE, terrain) {
   const pos = new Float32Array(nx * nz * 3);
   const col = new Float32Array(nx * nz * 3);
   const nrm = { x: 0, y: 1, z: 0 };
+  const tmpC = new THREE.Color();
   let p = 0;
   for (let j = 0; j < nz; j++) {
     const z = 20 - j * dz;
@@ -141,9 +142,10 @@ export function buildTerrainMesh(THREE, terrain) {
       // steeper = slightly bluer/darker snow, helps read the slope
       const steep = 1 - nrm.y;
       // a little per-vertex grain so speed and terrain shape read in motion
-      const grain = (Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1 * 0.05;
-      const shade = 0.95 - steep * 1.3 + grain;
-      col[p] = shade * 0.9; col[p + 1] = shade * 0.95; col[p + 2] = Math.min(1, shade * 1.03 + 0.04);
+      const grain = ((Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1) * 0.025;
+      const t = Math.min(1, steep * 5);                    // 0 flat .. 1 at ~37°
+      tmpC.setRGB(0.96 - 0.12 * t + grain, 0.975 - 0.08 * t + grain, 1.0 - 0.02 * t + grain, THREE.SRGBColorSpace);
+      col[p] = tmpC.r; col[p + 1] = tmpC.g; col[p + 2] = tmpC.b;
       p += 3;
     }
   }
@@ -164,6 +166,7 @@ export function buildTerrainMesh(THREE, terrain) {
   geo.computeVertexNormals();
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
 
   const group = new THREE.Group();
   group.add(mesh);
@@ -174,7 +177,7 @@ export function buildTerrainMesh(THREE, terrain) {
   const canopyGeo = new THREE.ConeGeometry(1, 1, 6);
   canopyGeo.translate(0, 0.5, 0);
   const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshLambertMaterial({ color: 0x5a3d2b, flatShading: true }), terrain.trees.length);
-  const canopies = new THREE.InstancedMesh(canopyGeo, new THREE.MeshLambertMaterial({ color: 0x2f5d3a, flatShading: true }), terrain.trees.length);
+  const canopies = new THREE.InstancedMesh(canopyGeo, new THREE.MeshLambertMaterial({ color: 0x2c5a3c, flatShading: true }), terrain.trees.length);
   const m = new THREE.Matrix4(), qt = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
   terrain.trees.forEach((t, i) => {
     const y = terrain.height(t.x, t.z) - 0.3;

@@ -2,29 +2,24 @@
 // particles, bones become distance constraints, and the snow is a collision
 // surface with friction, so a crash tumbles with the momentum you had.
 import * as THREE from 'three';
-import { BONES, J, MATERIALS, placeBone } from './skierModel.js';
+import { SEGMENTS, LINKS, J, Body } from './skierModel.js';
 
 const EXTRA = [ // braces that keep the body from folding into a pile of noodles
   ['head', 'hip'], ['lHip', 'rHip'], ['chest', 'lHip'], ['chest', 'rHip'],
   ['lKnee', 'lTip'], ['lKnee', 'lTail'], ['rKnee', 'rTip'], ['rKnee', 'rTail'],
   ['lFoot', 'lTip'], ['lFoot', 'lTail'], ['rFoot', 'rTip'], ['rFoot', 'rTail'],
-  ['hip', 'lHip'], ['hip', 'rHip'], ['lElbow', 'rElbow'],
+  ['hip', 'lHip'], ['hip', 'rHip'], ['head', 'lShoulder'], ['head', 'rShoulder'],
 ];
 
 export class Ragdoll {
   constructor(scene, terrain, settings) {
     this.terrain = terrain; this.S = settings;
     this.group = new THREE.Group();
-    this.meshes = BONES.map(([, , , m]) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), MATERIALS[m]);
-      this.group.add(mesh); return mesh;
-    });
-    this.helmet = new THREE.Mesh(new THREE.IcosahedronGeometry(0.15, 0), MATERIALS.helmet);
-    this.group.add(this.helmet);
+    this.body = new Body(this.group);
     this.group.visible = false;
     scene.add(this.group);
     this.p = []; this.prev = [];
-    this.links = [...BONES.map(([a, b]) => [J[a], J[b]]), ...EXTRA.map(([a, b]) => [J[a], J[b]])];
+    this.links = [...SEGMENTS.map(([, a, b]) => [J[a], J[b]]), ...LINKS.map(([a, b]) => [J[a], J[b]]), ...EXTRA.map(([a, b]) => [J[a], J[b]])];
     this.rest = [];
     this.active = false;
     this.time = 0; this.still = 0;
@@ -105,7 +100,6 @@ export class Ragdoll {
 
   render() {
     if (!this.active) return;
-    BONES.forEach(([a, b, th], i) => placeBone(this.meshes[i], this.p[J[a]], this.p[J[b]], th, a.endsWith('Tail')));
-    this.helmet.position.copy(this.p[J.head]);
+    this.body.apply(this.p);
   }
 }

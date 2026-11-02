@@ -9,23 +9,50 @@ import { SkiAudio } from './audio.js';
 import { SETTINGS_SPEC, loadSettings, saveSettings, defaultSettings } from './settings.js';
 
 const DT = 1 / 120;           // physics step
-const SKY = 0xa9c6e3;
+const SKY = 0xc4d8ec;      // horizon haze
 const $ = (id) => document.getElementById(id);
 
 // ---------------------------------------------------------------- renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25)); // Chromebook-friendly
 renderer.setSize(innerWidth, innerHeight);
+// one small shadow map that follows the skier: cheap, and it grounds the character
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 $('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 90, 650);
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 1500);
-scene.add(new THREE.HemisphereLight(0xe6f0ff, 0x6c7f9c, 0.9));
-const sun = new THREE.DirectionalLight(0xfff6e8, 1.0);
-sun.position.set(-0.7, 1, 0.08); // mostly overhead + from the side: ramps and landings both lit
-scene.add(sun);
+scene.fog = new THREE.Fog(SKY, 120, 900);
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 2500);
+// Three's Lambert divides by π, so these intensities sum to ~1 on flat snow.
+scene.add(new THREE.HemisphereLight(0xd6e4ff, 0x6f7f9f, 0.95));
+const sun = new THREE.DirectionalLight(0xfff1dc, 2.1);
+const SUN_DIR = new THREE.Vector3(-0.55, 1, 0.25).normalize(); // high, from the side
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 1, far: 60 });
+sun.shadow.bias = -0.0008;
+sun.shadow.normalBias = 0.02;
+scene.add(sun, sun.target);
+
+// sky dome: vertex-colored gradient, follows the camera
+const sky = (() => {
+  const g = new THREE.SphereGeometry(1200, 24, 12);
+  const col = [], top = new THREE.Color(0x3f78c0), mid = new THREE.Color(0x8fb8e6), hor = new THREE.Color(SKY);
+  const p = g.attributes.position, c = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    const h = p.getY(i) / 1200;
+    if (h > 0.25) c.copy(mid).lerp(top, Math.min(1, (h - 0.25) / 0.6));
+    else c.copy(hor).lerp(mid, Math.max(0, h / 0.25));
+    col.push(c.r, c.g, c.b);
+  }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+  m.renderOrder = -1;
+  scene.add(m);
+  return m;
+})();
 
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
@@ -76,7 +103,7 @@ const audio = new SkiAudio();
 
 function addBackdrop() {
   const geo = new THREE.ConeGeometry(1, 1, 7);
-  const mat = new THREE.MeshLambertMaterial({ color: 0xe9f1fa, flatShading: true });
+  const mat = new THREE.MeshLambertMaterial({ color: 0xf2f6fb, flatShading: true });
   let seed = 7;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (let i = 0; i < 26; i++) {
@@ -258,7 +285,7 @@ function updateCamera(dt) {
 
 // ------------------------------------------------------------------ HUD
 const hud = {
-  kmh: $('speed-kmh'), ms: $('speed-ms'), slope: $('t-slope'), edge: $('t-edge'), slip: $('t-slip'), g: $('t-g'), st: $('t-state'),
+  kmh: $('speed-kmh'), ms: $('speed-ms'), slope: $('t-slope'), edge: $('t-edge'), slip: $('t-slip'), g: $('t-g'), st: $('t-state'), wind: $('t-wind'),
 };
 let hudTimer = 0;
 function updateHud(dt) {
@@ -273,6 +300,12 @@ function updateHud(dt) {
   hud.edge.textContent = `${Math.round(Math.abs(sk.edge) * 57.3)}°`;
   hud.slip.textContent = `${Math.round(sk.slip * 57.3)}°`;
   hud.g.textContent = `${(sk.grounded ? sk.Nacc / settings.gravity : 0).toFixed(1)} g`;
+  // wind-up shown as the spin/flip it would start at full rate per second of air
+  const ws = sk.grounded ? sk.windSpin : 0, wf = sk.grounded ? sk.windFlip : 0;
+  const parts = [];
+  if (Math.abs(ws) > 0.02) parts.push(`${ws > 0 ? '↻' : '↺'} ${Math.round(Math.abs(ws) * 7.5 * settings.spinRate * 57.3)}°/s`);
+  if (Math.abs(wf) > 0.02) parts.push(`${wf < 0 ? 'back' : 'front'} ${Math.round(Math.abs(wf) * 6 * settings.spinRate * 57.3)}°/s`);
+  hud.wind.textContent = parts.length ? parts.join(' ') : '–';
   let label = 'GLIDE', cls = '';
   if (sk.crashed) label = 'CRASH';
   else if (!sk.grounded) { label = 'AIR'; cls = 'air'; }
@@ -328,6 +361,9 @@ function frame(now) {
     const sc = 1.6 / (1 + hgt * 0.15);
     shadow.scale.set(sc, sc * 1.5, 1);
     shadow.visible = !skier.crashed;
+    shadow.material.opacity = Math.max(0, 0.6 - hgt * 0.04); // blob mainly helps judge height in the air
+    sun.target.position.set(f.x, f.y, f.z);
+    sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 30);
     if (!debug.freeCam) updateCamera(dt);
     updateHud(dt);
     audio.update(skier.speed(), skier.crashed ? 0 : skier.scrubPower, !skier.grounded);
@@ -338,6 +374,7 @@ function frame(now) {
     camera.position.set(Math.sin(t * 0.1) * 30, 25 - 40, -120 + Math.cos(t * 0.1) * 20);
     camera.lookAt(0, -70, -330);
   }
+  sky.position.copy(camera.position);
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);

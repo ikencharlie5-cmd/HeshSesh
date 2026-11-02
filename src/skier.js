@@ -64,7 +64,11 @@ export class Skier {
     this.edge = 0;          // signed edge angle (rad), + = tipped toward travel-right
     this.tuck = 0;          // 0 stand .. 1 full tuck
     this.charge = 0;        // ollie crouch (s)
-    this.coyoteCharge = 0;
+    this.windSpin = 0;      // pre-wound rotation while crouched for an ollie (-1..1)
+    this.windFlip = 0;
+    this.yawRate = 0;       // how fast the skis are turning on the snow (rad/s, + = right)
+    this.spinMom = 0; this.flipMom = 0; // angular momentum per unit inertia, open body
+    this.coyote = null;
     this.airArm = { left: true, right: true, up: true, down: true };
     this.jumpWasHeld = false;
     this.Nacc = this.S.gravity; // normal acceleration (m/s²) the snow pushes back with
@@ -115,8 +119,22 @@ export class Skier {
     let vf = dot(v, f);
     const dirSign = vf >= 0 ? 1 : -1;     // riding forward or switch
     if (speed > 1.5) this.switch = dirSign < 0;
-    const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
-    const braking = inp.up && speed > 1.5;
+    const charging = inp.jump;
+    const headingBefore = copy(this._hb || (this._hb = v3()), f);
+    // While crouched for an ollie the arrows wind the upper body up instead of
+    // steering: skis run flat and straight, rotation gets stored for the pop.
+    const steerRaw = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+    const flipRaw = (inp.down ? 1 : 0) - (inp.up ? 1 : 0);
+    if (charging) {
+      // ~1.2 s to wind up fully: hold longer = more rotation
+      this.windSpin = approach(this.windSpin, steerRaw ? steerRaw : this.windSpin, 0.85 * dt);
+      this.windFlip = approach(this.windFlip, flipRaw ? flipRaw : this.windFlip, 0.85 * dt);
+    } else {
+      this.windSpin = approach(this.windSpin, 0, 4 * dt);
+      this.windFlip = approach(this.windFlip, 0, 4 * dt);
+    }
+    const steer = charging ? 0 : steerRaw;
+    const braking = !charging && inp.down && speed > 1.5;   // ↓ = skid / stop
 
     // ---- edge angle (rate-limited: it takes time to roll the skis over)
     let edgeTarget;
@@ -127,7 +145,7 @@ export class Skier {
       edgeTarget = steer * MAX_EDGE * clamp(0.35 + speed / 12, 0, 1);
     }
     this.edge = approach(this.edge, edgeTarget, 3.2 * dt);
-    this.tuck = approach(this.tuck, inp.down && !braking && speed > 3 ? 1 : 0, 4 * dt);
+    this.tuck = approach(this.tuck, inp.up && !braking && !charging && speed > 3 ? 1 : 0, 4 * dt); // ↑ = tuck
 
     // ---- travel frame (velocity direction) & slip angle
     const travel = this._t;
@@ -172,6 +190,9 @@ export class Skier {
     // recompute frame after rotations
     copy(f, this.heading); projectPlane(f, n); normalize(f); copy(this.heading, f);
     cross(r, f, n);
+    // yaw rate of the skis: carried into the air as spin when you leave the snow
+    const yaw = Math.atan2(dot(cross(this._tmp, f, headingBefore), n), dot(f, headingBefore));
+    this.yawRate += (yaw / dt - this.yawRate) * 0.3;
     vf = dot(v, f);
     let vr = dot(v, r);
     const vn = dot(v, n);
@@ -184,7 +205,7 @@ export class Skier {
     vr += gr * dt;
 
     // ---- skating / pole push on flats
-    if (inp.down && speed < 5 && Math.abs(gf) < 2.5 && !braking) vf += (this.switch ? -1 : 1) * 2.6 * dt;
+    if (inp.up && !charging && speed < 5 && Math.abs(gf) < 2.5 && !braking) vf += (this.switch ? -1 : 1) * 2.6 * dt;
 
     // ---- snow friction (Coulomb, ∝ normal force)
     const N = clamp(this.Nacc, 0, 6 * g);
@@ -227,12 +248,14 @@ export class Skier {
 
     // ---- integrate & resolve ground contact
     if (popped) {
+      this._ws = this.windSpin; this._wf = this.windFlip;
       const pop = S.popStrength * (1.5 + 2.4 * (this.charge / 0.5));
       addScaled(v, n, pop);
       this.charge = 0;
     }
     addScaled(this.pos, v, dt);
     this.resolveGround(dt, inp, popped);
+    if (!this.grounded && popped) this.releaseWind(this._ws, this._wf);
   }
 
   resolveGround(dt, inp, popped) {
@@ -248,30 +271,33 @@ export class Skier {
       this.Nacc += (Ninst - this.Nacc) * 0.35;
       if (Ninst > 9 * this.S.gravity && this.speed() > 12) this.doCrash('Slammed into the slope');
     } else {
-      this.takeoff(inp);
+      this.takeoff(inp, false);
     }
   }
 
-  takeoff(inp) {
+  takeoff(inp, popped) {
     this.grounded = false;
     this.airTime = 0;
     this.spin = 0; this.flip = 0;
-    const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
-    // winding up before the lip pre-loads rotation (you carry angular momentum off the snow)
-    // Keys already held when leaving the snow (e.g. tuck, a turn) don't start
-    // flips/spins until re-pressed, so you don't flip by accident off a roller.
-    // Exception: winding up with a turn while popping an ollie.
-    const poppedNow = this.jumpWasHeld && !inp.jump;
-    this.airArm = { left: !inp.left || poppedNow, right: !inp.right || poppedNow, up: !inp.up, down: !inp.down };
-    this.spinRate = poppedNow ? steer * 3.0 * this.S.spinRate : 0;
-    this.flipRate = 0;
+    // Rotation is decided on the snow: whatever the skis were already turning
+    // at (a carve) plus the wind-up you release with the pop. In the air you
+    // can only fine-tune it (arms, tucking tighter).
+    this.spinMom = this.yawRate * 0.8;
+    this.airArm = { left: !inp.left, right: !inp.right, up: !inp.up, down: !inp.down };
+    this.flipMom = 0;
+    if (popped) this.releaseWind();
+    else if (inp.jump && this.charge > 0) this.coyote = { charge: this.charge, spin: this.windSpin, flip: this.windFlip };
+    this.windSpin = 0; this.windFlip = 0;
     this.grabTime = 0; this.grabbing = false;
-    this.takeoffY = this.pos.y;
     this.maxAirHeight = 0;
-    // late pop: releasing the ollie just after leaving the lip still counts
-    this.coyoteCharge = inp.jump ? this.charge : 0;
     this.charge = 0;
     this.Nacc = 0;
+  }
+
+  releaseWind(spin = this.windSpin, flip = this.windFlip) {
+    const S = this.S;
+    this.spinMom += spin * 7.5 * S.spinRate;
+    this.flipMom += flip * 6.0 * S.spinRate;
   }
 
   // ---------------------------------------------------------------------
@@ -285,27 +311,33 @@ export class Skier {
     const aDrag = 0.5 * RHO * CdA * speed * speed / MASS;
     if (speed > 1e-3) scale(v, Math.max(0, 1 - aDrag * dt / speed));
 
-    if (!inp.jump && this.coyoteCharge > 0) {
-      if (this.airTime < 0.15) addScaled(v, this.n, S.popStrength * (1.5 + 2.4 * (this.coyoteCharge / 0.5)));
-      this.coyoteCharge = 0;
+    // late pop: releasing the ollie just after leaving the lip still counts
+    if (this.coyote && !inp.jump) {
+      if (this.airTime < 0.2) {
+        addScaled(v, this.n, S.popStrength * (1.5 + 2.4 * (this.coyote.charge / 0.5)));
+        this.releaseWind(this.coyote.spin, this.coyote.flip);
+      }
+      this.coyote = null;
     }
     this.jumpWasHeld = inp.jump;
 
-    // rotation in the air (body attitude is independent of the trajectory)
+    // Angular momentum is conserved. Arms give a small corrective torque
+    // (strength = "Air control" setting); grabbing pulls the body in, which
+    // lowers the moment of inertia and speeds the rotation up (like a skater).
+    // keys still held from the snow (tuck, a turn) don't count until pressed again
     const A = this.airArm;
     for (const k of ['left', 'right', 'up', 'down']) if (!inp[k]) A[k] = true;
-    const L = inp.left && A.left, R = inp.right && A.right, U = inp.up && A.up, D = inp.down && A.down;
-    const steer = (R ? 1 : 0) - (L ? 1 : 0);
-    const flipIn = (D ? 1 : 0) - (U ? 1 : 0); // down = front flip, up = back flip
+    const steer = (inp.right && A.right ? 1 : 0) - (inp.left && A.left ? 1 : 0);
+    const flipIn = (inp.down && A.down ? 1 : 0) - (inp.up && A.up ? 1 : 0); // down = front flip, up = back flip
     this.grabbing = !!inp.grab;
     if (this.grabbing) this.grabTime += dt;
-    // grabbing = tucked body = smaller moment of inertia = rotates a bit faster
-    const tuckBoost = this.grabbing ? 1.15 : 1;
-    const spinMax = 7.5 * S.spinRate * tuckBoost, flipMax = 6.0 * S.spinRate * tuckBoost;
-    if (steer) this.spinRate = approach(this.spinRate, steer * spinMax, 16 * dt);
-    else this.spinRate = approach(this.spinRate, 0, 8 * dt);
-    if (flipIn) this.flipRate = approach(this.flipRate, flipIn * flipMax, 14 * dt);
-    else this.flipRate = approach(this.flipRate, 0, 8 * dt);
+    const torque = 2.0 * S.airControl * dt;
+    const spinMax = 7.5 * S.spinRate, flipMax = 6.0 * S.spinRate;
+    if (steer) this.spinMom = clamp(this.spinMom + steer * torque, -spinMax, spinMax);
+    if (flipIn) this.flipMom = clamp(this.flipMom + flipIn * torque, -flipMax, flipMax);
+    const inertia = this.grabbing ? 1 / 1.3 : 1;
+    this.spinRate = this.spinMom / inertia;
+    this.flipRate = this.flipMom / inertia;
     this.spin += this.spinRate * dt;
     this.flip += this.flipRate * dt;
     rotateAxis(this.heading, { x: 0, y: 1, z: 0 }, -this.spinRate * dt);
@@ -358,7 +390,7 @@ export class Skier {
     if (tangential > 1e-3) scale(v, (tangential - loss) / tangential);
     this.grounded = true;
     this.Nacc = S.gravity;
-    this.flip = 0; this.spin = 0; this.spinRate = 0; this.flipRate = 0;
+    this.flip = 0; this.spin = 0; this.spinRate = 0; this.flipRate = 0; this.spinMom = 0; this.flipMom = 0; this.yawRate = 0;
     this.grabbing = false;
     projectPlane(this.heading, n); normalize(this.heading);
     this.events.push(info);

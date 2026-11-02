@@ -26,8 +26,8 @@ Next steps: **2. Terrain Park** (kickers, rails/boxes, halfpipe), then **3. Free
 | Key | Ground | Air |
 |---|---|---|
 | ← / → | Roll skis on edge and turn. More edge gives a tighter carve | Spin |
-| ↓ | Tuck (less drag). At low speed it skates / pole-pushes instead | Front flip |
-| ↑ | Skid / hockey stop. ←/→ picks the side | Back flip |
+| ↑ | Tuck (less drag). At low speed it skates / pole-pushes instead | Back flip (nudge) |
+| ↓ | Skid / hockey stop. ←/→ picks the side | Front flip (nudge) |
 | Space | Hold to crouch, release to ollie. Releasing right at a lip adds pop | |
 | Shift / G | | Grab |
 | R | Respawn at the last checkpoint | |
@@ -35,7 +35,14 @@ Next steps: **2. Terrain Park** (kickers, rails/boxes, halfpipe), then **3. Free
 | P | Physics settings panel | |
 | M / Esc | Mute / menu | |
 
-WASD also works. Keys you're already holding when you leave the snow (like tuck) don't start flips until you press them again, so you won't flip by accident off a roller. The exception is holding a turn while you pop an ollie: that winds up a spin.
+WASD also works.
+
+**Air control is realistic.** Rotation is decided on the snow:
+- Hold Space to crouch. While crouched, the arrows wind up your upper body instead of steering. Hold an arrow longer for more rotation; the HUD shows the wind-up.
+- Release Space at the lip. The pop launches you with that spin or flip.
+- If you're already carving when you leave the snow, that rotation carries into the air too.
+- In the air, angular momentum is conserved. The arrows only nudge it a little (the **Air control** slider sets how much). Grabbing pulls you in tighter, so you spin faster.
+- Keys you were already holding at takeoff don't count until you press them again.
 
 ## The physics model (`src/skier.js`)
 
