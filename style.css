@@ -1,0 +1,47 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #a9c6e3; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; }
+#app, canvas { position: fixed; inset: 0; display: block; }
+.hidden { display: none !important; }
+.sub { font-size: 12px; opacity: 0.8; }
+button { font: inherit; cursor: pointer; border: 0; border-radius: 8px; padding: 8px 14px; background: rgba(255,255,255,0.9); color: #13233a; }
+button:hover { background: #fff; }
+button:disabled { opacity: 0.45; cursor: default; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,0.45); }
+#hud button { pointer-events: auto; }
+#speedo { position: absolute; left: 20px; bottom: 70px; }
+#speed-kmh { font-size: 64px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+#speedo .unit { font-size: 14px; font-weight: 600; letter-spacing: 0.1em; }
+#telemetry { position: absolute; left: 20px; top: 20px; background: rgba(10,25,45,0.35); padding: 10px 12px; border-radius: 10px; font-size: 13px; min-width: 150px; font-variant-numeric: tabular-nums; }
+#telemetry div { display: flex; justify-content: space-between; gap: 14px; }
+#telemetry .k { opacity: 0.75; }
+#telemetry .state { margin-top: 6px; font-weight: 800; letter-spacing: 0.08em; justify-content: center; }
+.state.carve { color: #7dffb0; } .state.skid { color: #ffd166; } .state.air { color: #8fd3ff; } .state.tuck { color: #ff9ecb; }
+#topright { position: absolute; right: 20px; top: 20px; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+#score { font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; }
+#trick { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; animation: pop 0.25s ease-out; }
+#trick-name { font-size: 34px; font-weight: 800; }
+#trick-grade { font-size: 18px; font-weight: 700; color: #7dffb0; }
+#trick-grade.sketchy { color: #ffd166; }
+#trick-score { font-size: 22px; font-weight: 700; }
+@keyframes pop { from { transform: translateX(-50%) scale(0.6); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
+#crash { position: absolute; left: 50%; top: 35%; transform: translateX(-50%); text-align: center; }
+#crash-reason { font-size: 36px; font-weight: 800; color: #ff6b6b; }
+#help { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); font-size: 12px; text-align: center; opacity: 0.85; width: max-content; max-width: calc(100% - 32px); }
+
+.overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(15,30,55,0.45); padding: 16px; }
+.panel { background: rgba(15,30,55,0.88); border-radius: 16px; padding: 28px; width: min(520px, 100%); }
+.panel h1 { margin: 0; font-size: 44px; letter-spacing: -0.02em; }
+.tag { margin: 4px 0 18px; opacity: 0.85; }
+.modes { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.mode { display: flex; flex-direction: column; align-items: flex-start; text-align: left; padding: 12px 16px; }
+.mode b { font-size: 18px; } .mode span { font-size: 13px; opacity: 0.8; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+#settings { position: fixed; right: 16px; top: 80px; bottom: 16px; width: min(330px, calc(100% - 32px)); overflow-y: auto; background: rgba(15,30,55,0.9); border-radius: 12px; padding: 14px 16px; font-size: 13px; }
+.settings-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 15px; }
+.settings-head button { padding: 2px 9px; }
+.setting { margin: 10px 0; }
+.setting label { display: flex; justify-content: space-between; font-weight: 600; }
+.setting input { width: 100%; }
+.setting .help { font-size: 11px; opacity: 0.7; }
