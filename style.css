@@ -18,12 +18,11 @@ button:disabled { opacity: 0.45; cursor: default; }
 #telemetry .state { margin-top: 6px; font-weight: 800; letter-spacing: 0.08em; justify-content: center; }
 .state.carve { color: #7dffb0; } .state.skid { color: #ffd166; } .state.air { color: #8fd3ff; } .state.tuck { color: #ff9ecb; }
 #topright { position: absolute; right: 20px; top: 20px; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-#score { font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; }
-#trick { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; animation: pop 0.25s ease-out; }
-#trick-name { font-size: 34px; font-weight: 800; }
-#trick-grade { font-size: 18px; font-weight: 700; color: #7dffb0; }
-#trick-grade.sketchy { color: #ffd166; }
-#trick-score { font-size: 22px; font-weight: 700; }
+#trick { position: absolute; left: 50%; top: 20%; transform: translateX(-50%); text-align: center; animation: pop 0.25s ease-out; }
+#trick-name { font-size: 24px; font-weight: 700; letter-spacing: 0.01em; opacity: 0.95; }
+#balance { position: absolute; left: 50%; bottom: 70px; transform: translateX(-50%); text-align: center; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; }
+#balance .bar { position: relative; width: 220px; height: 10px; margin-top: 4px; border-radius: 5px; background: linear-gradient(90deg, #ff6b6b, #ffd166 30%, #7dffb0 45%, #7dffb0 55%, #ffd166 70%, #ff6b6b); opacity: 0.9; }
+#balance-dot { position: absolute; top: -4px; left: 50%; width: 6px; height: 18px; margin-left: -3px; border-radius: 3px; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,0.5); }
 @keyframes pop { from { transform: translateX(-50%) scale(0.6); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
 #crash { position: absolute; left: 50%; top: 35%; transform: translateX(-50%); text-align: center; }
 #crash-reason { font-size: 36px; font-weight: 800; color: #ff6b6b; }

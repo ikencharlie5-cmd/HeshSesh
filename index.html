@@ -28,15 +28,15 @@
       <div id="t-state" class="state">GLIDE</div>
     </div>
     <div id="topright">
-      <div id="score">0</div>
       <div id="checkpoint" class="sub">Checkpoint: Top</div>
       <button id="btn-settings" title="Physics settings (P)">⚙ Physics</button>
     </div>
-    <div id="trick" class="hidden"><div id="trick-name"></div><div id="trick-grade"></div><div id="trick-score"></div></div>
+    <div id="trick" class="hidden"><div id="trick-name"></div></div>
+    <div id="balance" class="hidden"><div class="lbl">Balance  ←/→</div><div class="bar"><div id="balance-dot"></div></div></div>
     <div id="crash" class="hidden"><div id="crash-reason"></div><div class="sub">R / Space to respawn</div></div>
     <div id="help">
       ←/→ edge &amp; turn · ↑ tuck (skate when slow) · ↓ skid / stop · Space hold+release: ollie<br>
-      Air: ←/→ spin · ↑ backflip · ↓ frontflip · let go to straighten out · Shift/G grab · R respawn · T top · 1–7 checkpoints · P physics · Esc menu
+      Air: ←/→ spin · ↑ backflip · ↓ frontflip · hold both to cork · let go to straighten out · Shift/G grab · Rails: ←/→ balance, Space to pop off · R respawn · T top · 1–7 checkpoints · Esc menu
     </div>
   </div>
 
@@ -48,7 +48,7 @@
       <div class="modes">
         <button class="mode" data-mode="mountain"><b>Mountain</b><span>Freeride a hand-built mountain: powder bowl, cliffs, gullies, forest, booters and a four-table jump line</span></button>
         <button class="mode" data-mode="slope"><b>Test Slope</b><span>One run with a kicker and a roller, good for tuning the physics</span></button>
-        <button class="mode" disabled><b>Terrain Park</b><span>Rails, boxes and a halfpipe: coming next</span></button>
+        <button class="mode" data-mode="park"><b>Terrain Park</b><span>One line: rail garden, three tables, then a halfpipe</span></button>
       </div>
       <div class="row">
         <button id="btn-resume" class="hidden">Resume</button>

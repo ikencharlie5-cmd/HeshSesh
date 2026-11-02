@@ -23,7 +23,7 @@
 
 import {
   v3, set, copy, dot, len, addScaled, scale, cross, normalize, projectPlane,
-  rotateAxis, clamp, wrapPi, approach,
+  rotateAxis, clamp, wrapPi, approach, quat, qmul, qnorm, qaxis, qrot, qbasis, qtoward,
 } from './vec.js';
 
 const DEG = Math.PI / 180;
@@ -59,6 +59,8 @@ export class Skier {
     this.yawRate = 0;       // how fast the skis are turning on the snow (rad/s, + = right)
     this.spinMom = 0; this.flipMom = 0; // angular momentum per unit inertia, open body
     this.coyote = null;
+    this.q = quat();
+    this.grind = null; this.railCooldown = 0;
     this.airArm = { left: true, right: true, up: true, down: true };
     this.jumpWasHeld = false;
     this.Nacc = this.S.gravity; // normal acceleration (m/s²) the snow pushes back with
@@ -81,6 +83,8 @@ export class Skier {
   // ---------------------------------------------------------------------
   step(dt, input) {
     if (this.crashed) return;
+    if (this.railCooldown > 0) this.railCooldown -= dt;
+    if (this.grind) { this.stepGrind(dt, input); return; }
     if (this.grounded) this.stepGround(dt, input);
     else this.stepAir(dt, input);
     this.collideTrees();
@@ -217,7 +221,7 @@ export class Skier {
 
     // ---- catching an edge: edge tipped *into* a big sideways slide
     const latTravel = vr * dirSign; // + = sliding toward travel-right
-    if (speed > 7 && Math.abs(latTravel) > 5 && Math.sign(this.edge) === Math.sign(latTravel) && aEdge > 18 * DEG) {
+    if (speed > 10 && Math.abs(latTravel) > 7 && Math.sign(this.edge) === Math.sign(latTravel) && aEdge > 25 * DEG) {
       this.doCrash('Caught an edge!');
       return;
     }
@@ -235,8 +239,9 @@ export class Skier {
       this.charge = 0;
     }
     addScaled(this.pos, v, dt);
+    const prevY = this.pos.y;
     this.resolveGround(dt, inp, popped);
-    if (!this.grounded && popped) this.releaseWind(this._ws, this._wf);
+    if (this.grounded) this.checkRails(prevY, inp);
   }
 
   resolveGround(dt, inp, popped) {
@@ -250,7 +255,7 @@ export class Skier {
       if (vn < 0) { addScaled(this.vel, n, -vn); Ninst = -vn / dt; }
       // smooth the measured normal force a little (snow/knees are not rigid)
       this.Nacc += (Ninst - this.Nacc) * 0.35;
-      if (Ninst > 9 * this.S.gravity && this.speed() > 12) this.doCrash('Slammed into the slope');
+      if (this.Nacc > 10 * this.S.gravity && this.speed() > 15) this.doCrash('Slammed into the slope');
     } else {
       this.takeoff(inp, false);
     }
@@ -260,25 +265,28 @@ export class Skier {
     this.grounded = false;
     this.airTime = 0;
     this.spin = 0; this.flip = 0;
-    // Rotation is decided on the snow: whatever the skis were already turning
-    // at (a carve) plus the wind-up you release with the pop. In the air you
-    // can only fine-tune it (arms, tucking tighter).
-    this.spinRate = this.yawRate * 0.5; this.flipRate = 0;
+    this.spinRate = 0; this.flipRate = 0;
     this.airArm = { left: true, right: true, up: !inp.up, down: !inp.down };
-    this.flipMom = 0;
-    if (popped) this.releaseWind();
-    else if (inp.jump && this.charge > 0) this.coyote = { charge: this.charge, spin: this.windSpin, flip: this.windFlip };
+    this.coyote = (!popped && inp.jump && this.charge > 0) ? { charge: this.charge } : null;
     this.windSpin = 0; this.windFlip = 0;
     this.grabTime = 0; this.grabbing = false;
     this.maxAirHeight = 0;
     this.charge = 0;
     this.Nacc = 0;
+    // body orientation leaves the snow exactly as it was on the snow
+    this.bodyFromBasis(this.q, this.heading, this.n);
+    // a vertical wall (halfpipe) sends you straight up, like a real vert wall
+    if (this.terrain.pipeAssist) this.terrain.pipeAssist(this.pos, this.vel);
   }
 
-  releaseWind(spin = this.windSpin, flip = this.windFlip) {
-    const S = this.S;
-    this.spinRate += spin * 6 * S.spinRate;
-    this.flipRate += flip * 5 * S.spinRate;
+  // q from forward + up, body frame: x = left, y = up, z = forward
+  bodyFromBasis(q, fwd, up) {
+    const Z = normalize(projectPlane(copy(this._qa || (this._qa = v3()), fwd), up));
+    if (len(fwd) < 1e-6) set(Z, 0, 0, -1);
+    const Y = copy(this._qb || (this._qb = v3()), up);
+    const X = normalize(cross(this._qc || (this._qc = v3()), Y, Z));
+    cross(Z, X, Y);
+    return qbasis(q, X, Y, Z);
   }
 
   // ---------------------------------------------------------------------
@@ -294,17 +302,15 @@ export class Skier {
 
     // late pop: releasing the ollie just after leaving the lip still counts
     if (this.coyote && !inp.jump) {
-      if (this.airTime < 0.2) {
-        addScaled(v, this.n, S.popStrength * (1.5 + 2.4 * (this.coyote.charge / 0.5)));
-        this.releaseWind(this.coyote.spin, this.coyote.flip);
-      }
+      if (this.airTime < 0.2) addScaled(v, this.n, S.popStrength * (1.5 + 2.4 * (this.coyote.charge / 0.5)));
       this.coyote = null;
     }
     this.jumpWasHeld = inp.jump;
 
-    // Arcade air: hold an arrow and you rotate, let go and you stop.
-    // With nothing held you auto-straighten toward the nearest clean landing
-    // (flips to upright, spins to forward or switch).
+    // Arcade air. Rotation happens around your own body axes: ←/→ spin around
+    // your spine, ↑/↓ flip head-over-heels. Hold both and the two combine into one
+    // smooth off-axis rotation (a cork / misty / rodeo). Let go and the rotation
+    // eases off while you settle to line up with the snow under you.
     const A = this.airArm;
     for (const k of ['left', 'right', 'up', 'down']) if (!inp[k]) A[k] = true;
     const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
@@ -312,24 +318,35 @@ export class Skier {
     this.grabbing = !!inp.grab;
     if (this.grabbing) this.grabTime += dt;
     const boost = this.grabbing ? 1.15 : 1;
-    const spinMax = 11 * S.spinRate * boost, flipMax = 8.5 * S.spinRate * boost;
-    const acc = 60 * S.airControl;
-    if (steer) this.spinRate = approach(this.spinRate, steer * spinMax, acc * dt);
-    else {
-      const res = this.spin - Math.round(this.spin / Math.PI) * Math.PI;
-      this.spinRate = approach(this.spinRate, clamp(-res * 7, -4, 4), acc * 0.8 * dt);
-    }
-    if (flipIn) this.flipRate = approach(this.flipRate, flipIn * flipMax, acc * 0.8 * dt);
-    else {
-      const res = this.flip - Math.round(this.flip / (2 * Math.PI)) * 2 * Math.PI;
-      this.flipRate = approach(this.flipRate, clamp(-res * 6, -4, 4), acc * 0.7 * dt);
-    }
+    const spinMax = 10 * S.spinRate * boost, flipMax = 8 * S.spinRate * boost;
+    const acc = 50 * S.airControl;
+    this.spinRate = approach(this.spinRate, steer * spinMax, (steer ? acc : acc * 0.6) * dt);
+    this.flipRate = approach(this.flipRate, flipIn * flipMax, (flipIn ? acc : acc * 0.6) * dt);
+    const q = this.q, dq = this._dq || (this._dq = quat());
+    qmul(q, q, qaxis(dq, 0, 1, 0, -this.spinRate * dt));  // spin about body up (+rate = to the right)
+    qmul(q, q, qaxis(dq, 1, 0, 0, this.flipRate * dt));   // flip about body left axis (+rate = nose down)
+    qnorm(q);
     this.spin += this.spinRate * dt;
     this.flip += this.flipRate * dt;
-    rotateAxis(this.heading, { x: 0, y: 1, z: 0 }, -this.spinRate * dt);
+
+    if (!steer && !flipIn) {
+      // settle: line the skis up with your motion over the snow below you
+      const nb = T.normal(this.pos.x, this.pos.z, this._nb || (this._nb = v3()));
+      const fwd = qrot(this._fw || (this._fw = v3()), q, 0, 0, 1);
+      const tgt = projectPlane(copy(this._tg || (this._tg = v3()), v), nb);
+      if (len(tgt) < 0.5) copy(tgt, fwd);
+      if (dot(tgt, fwd) < 0) scale(tgt, -1);              // forward or switch, whichever is closer
+      const qt = this.bodyFromBasis(this._qt || (this._qt = quat()), tgt, nb);
+      const settle = 4.5 * S.airControl * (1 + Math.min(2, this.airTime));
+      qtoward(q, qt, settle * dt * Math.max(0.15, 1 - Math.hypot(this.spinRate, this.flipRate) / 8));
+    }
+    // heading follows the body (used for trees, camera, landing)
+    qrot(this.heading, q, 0, 0, 1);
     this.tuck = approach(this.tuck, 0, 3 * dt);
 
+    const prevY = this.pos.y;
     addScaled(this.pos, v, dt);
+    if (this.checkRails(prevY, inp)) return;
     const gy = T.height(this.pos.x, this.pos.z);
     this.maxAirHeight = Math.max(this.maxAirHeight, this.pos.y - gy);
     if (this.pos.y <= gy) {
@@ -345,41 +362,146 @@ export class Skier {
     const vn = dot(v, n);
     const impact = Math.max(0, -vn);
     this.lastImpact = impact;
+    const up = qrot(this._up || (this._up = v3()), this.q, 0, 1, 0);
+    const fwd = qrot(this._fw || (this._fw = v3()), this.q, 0, 0, 1);
+    const tilt = Math.acos(clamp(dot(up, n), -1, 1));
 
-    // residual rotation: flips must come round to ~0, spins to a multiple of 180°
-    const flipRes = wrapPi(this.flip);
-    const halfTurns = Math.round(this.spin / Math.PI);
-    const spinRes = this.spin - halfTurns * Math.PI;
-    const airTime = this.airTime;
-
-    const tangential = Math.sqrt(Math.max(0, dot(v, v) - vn * vn));
+    // Forgiving: you only go down for a truly brutal impact or landing on your head/back.
     let reason = null;
-    if (impact > S.landingTolerance) reason = impact > S.landingTolerance * 1.6 ? 'Flat landing — legs gave out' : 'Landed too hard';
-    else if (Math.abs(flipRes) > 65 * DEG) reason = flipRes > 0 ? 'Over-rotated' : 'Under-rotated';
-    else if (Math.abs(spinRes) > 55 * DEG && tangential > 4) reason = 'Landed sideways';
+    if (impact > S.landingTolerance) reason = 'Too much impact';
+    else if (tilt > 115 * DEG) reason = up.y < 0 ? 'Landed on your head' : 'Landed on your back';
 
-    const quality = 1 - Math.max(impact / S.landingTolerance, Math.abs(flipRes) / (65 * DEG), Math.abs(spinRes) / (55 * DEG));
     const info = {
-      type: 'land', airTime, spin: this.spin, flip: this.flip, grabTime: this.grabTime,
-      impact, quality: clamp(quality, 0, 1), height: this.maxAirHeight, speed: len(v), crashed: !!reason,
+      type: 'land', airTime: this.airTime, spin: this.spin, flip: this.flip, grabTime: this.grabTime,
+      impact, tilt, height: this.maxAirHeight, speed: len(v), crashed: !!reason,
     };
+    if (reason) { this.events.push(info); this.doCrash(reason); return; }
 
-    if (reason) {
-      this.events.push(info);
-      this.doCrash(reason);
-      return;
-    }
-
-    // absorb the impact: kill normal velocity; friction during the impulse costs a bit of speed
+    // absorb: kill the into-slope velocity; a sketchy landing scrubs a bit of speed
     addScaled(v, n, -vn);
-    const loss = Math.min(tangential, 0.12 * impact + Math.abs(spinRes) * 3);
+    const tangential = len(v);
+    const loss = Math.min(tangential * 0.5, 0.06 * impact + (tilt > 50 * DEG ? 0.15 * tangential : 0));
     if (tangential > 1e-3) scale(v, (tangential - loss) / tangential);
+    // skis land wherever they point: landing sideways is just a skid, not a crash
+    copy(this.heading, fwd); projectPlane(this.heading, n);
+    if (len(this.heading) < 0.2) { copy(this.heading, v); projectPlane(this.heading, n); }
+    normalize(this.heading);
     this.grounded = true;
     this.Nacc = S.gravity;
-    this.flip = 0; this.spin = 0; this.spinRate = 0; this.flipRate = 0; this.spinMom = 0; this.flipMom = 0; this.yawRate = 0;
+    this.spinRate = 0; this.flipRate = 0; this.yawRate = 0;
     this.grabbing = false;
-    projectPlane(this.heading, n); normalize(this.heading);
     this.events.push(info);
+  }
+
+  // ---------------------------------------------------------------------
+  // Rails and boxes: you lock on when your skis come down onto (or ride onto)
+  // the top. Then you slide with gravity and rail friction, and balance an
+  // inverted pendulum: ←/→ shift your weight. Lean too far and you slide off.
+  checkRails(prevY, inp) {
+    const rails = this.terrain.rails;
+    if (!rails || this.railCooldown > 0) return false;
+    const p = this.pos, v = this.vel;
+    for (const r of rails) {
+      for (let i = 0; i < r.segs.length; i++) {
+        const sg = r.segs[i];
+        const qx = p.x - sg.a.x, qz = p.z - sg.a.z;
+        const t = (qx * sg.hx + qz * sg.hz) / sg.hlen;
+        if (t < -0.02 || t > 1.02) continue;
+        const lat = Math.abs(qx * sg.hz - qz * sg.hx);
+        const fwdLat = Math.abs(this.heading.x * sg.hz - this.heading.z * sg.hx); // |sin| skis vs rail
+        if (lat > r.halfW + 0.2 + 0.45 * fwdLat) continue;
+        const top = sg.a.y + (sg.b.y - sg.a.y) * clamp(t, 0, 1);
+        const onTop = this.grounded
+          ? Math.abs(p.y - top) < 0.3
+          : prevY >= top - 0.08 && p.y <= top + 0.12 && v.y <= 1.5;
+        if (!onTop) continue;
+        const sign = v.x * sg.hx + v.z * sg.hz >= 0 ? 1 : -1;
+        const along = (v.x * sg.d.x + v.y * sg.d.y + v.z * sg.d.z) * sign;
+        if (along < 1) continue;
+        // stance: snap the angle between skis and rail to 0 / 90 / 180°
+        const tx = sg.hx / sg.hl * sign, tz = sg.hz / sg.hl * sign;
+        const fx = this.heading.x, fz = this.heading.z;
+        const ang = Math.atan2(fx * tz - fz * tx, fx * tx + fz * tz);
+        const stance = Math.round(ang / (Math.PI / 2)) * (Math.PI / 2);
+        const latV = (v.x * -tz + v.z * tx);
+        this.grind = {
+          r, i, s: clamp(t, 0, 1) * sg.len, sign, v: along, stance, phi: 0, phiDot: clamp(latV * 0.35, -1.5, 1.5),
+          time: 0, dist: 0,
+        };
+        this.grounded = false;
+        this.events.push({ type: 'grindStart', rail: r.name });
+        this.stepGrindPose();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  stepGrind(dt, inp) {
+    const G = this.grind, S = this.S, g = S.gravity;
+    const r = G.r;
+    let sg = r.segs[G.i];
+    const tx = sg.d.x * G.sign, ty = sg.d.y * G.sign, tz = sg.d.z * G.sign;
+    // gravity along the rail minus sliding friction
+    const N = g * Math.sqrt(Math.max(0, 1 - ty * ty));
+    G.v += (-g * ty - r.mu * N) * dt;
+    G.v -= 0.5 * RHO * 0.5 * S.dragScale * G.v * G.v / MASS * dt;
+    G.time += dt;
+    G.dist += G.v * dt;
+    G.s += G.v * dt * G.sign;
+    // balance: an unstable pendulum with random wobble; ←/→ to correct
+    const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+    const unstable = r.kind === 'rail' ? 2.6 : 1.2;
+    let acc = unstable * Math.sin(G.phi) + (Math.random() - 0.5) * (r.kind === 'rail' ? 22 : 12) * (0.5 + G.v / 12)
+      + steer * 9 - 1.8 * G.phiDot;
+    if (r.kind === 'box' && Math.abs(G.phi) < 0.15) acc -= 6 * G.phi; // wide box: a little self-centering
+    G.phiDot += acc * dt;
+    G.phi += G.phiDot * dt;
+
+    const popped = !inp.jump && this.jumpWasHeld;
+    this.jumpWasHeld = inp.jump;
+    // walk across segment ends
+    while (G.s > sg.len || G.s < 0) {
+      const next = G.i + G.sign;
+      if (next < 0 || next >= r.segs.length) return this.leaveRail(inp, 'end');
+      G.s = G.s > sg.len ? G.s - sg.len : G.s + r.segs[next].len;
+      G.i = next; sg = r.segs[G.i];
+    }
+    if (popped) return this.leaveRail(inp, 'pop');
+    if (Math.abs(G.phi) > 0.8) return this.leaveRail(inp, 'fell');
+    if (G.v < 0.4) return this.leaveRail(inp, 'stall');
+    this.stepGrindPose();
+  }
+
+  stepGrindPose() {
+    const G = this.grind, sg = G.r.segs[G.i];
+    set(this.pos, sg.a.x + sg.d.x * G.s, sg.a.y + sg.d.y * G.s, sg.a.z + sg.d.z * G.s);
+    const t = set(this._t, sg.d.x * G.sign, sg.d.y * G.sign, sg.d.z * G.sign);
+    set(this.vel, t.x * G.v, t.y * G.v, t.z * G.v);
+    // skis across or along the rail, tipped by the balance angle
+    set(this.n, 0, 1, 0);
+    const th = normalize(set(this._tmp, t.x, 0, t.z));
+    rotateAxis(this.n, th, G.phi);
+    copy(this.heading, th);
+    rotateAxis(this.heading, { x: 0, y: 1, z: 0 }, G.stance);
+    this.lean = 0; this.edge = 0;
+  }
+
+  leaveRail(inp, why) {
+    const G = this.grind;
+    this.grind = null;
+    this.railCooldown = 0.3;
+    const sg = G.r.segs[G.i];
+    if (why === 'fell') {
+      // slip off the side you were leaning toward
+      const side = normalize(set(this._tmp, -sg.hz * G.sign, 0, sg.hx * G.sign));
+      addScaled(this.vel, side, -Math.sign(G.phi) * 2);
+    }
+    if (why === 'pop') addScaled(this.vel, { x: 0, y: 1, z: 0 }, 3.5 * this.S.popStrength);
+    else addScaled(this.vel, { x: 0, y: 1, z: 0 }, 0.6);
+    this.events.push({ type: 'grind', rail: G.r.name, kind: G.r.kind, stance: G.stance, time: G.time, dist: G.dist, fell: why === 'fell' });
+    set(this.n, 0, 1, 0);
+    this.takeoff(inp, true);
   }
 
   collideTrees() {

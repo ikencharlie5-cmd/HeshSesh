@@ -13,7 +13,7 @@ export const SETTINGS_SPEC = [
     help: 'Smaller = tighter carved turns (slalom ski ≈ 12 m, GS ≈ 25 m).' },
   { key: 'skidFriction',   label: 'Skid friction',      unit: '',     min: 0.1,  max: 1.5, step: 0.05,  def: 0.9,
     help: 'Friction when the ski slides sideways. Higher = skids scrub more speed.' },
-  { key: 'landingTolerance', label: 'Landing tolerance', unit: 'm/s', min: 3,    max: 25,  step: 0.5,   def: 12,
+  { key: 'landingTolerance', label: 'Landing tolerance', unit: 'm/s', min: 3,    max: 40,  step: 0.5,   def: 20,
     help: 'Max impact speed into the slope your legs can absorb before you crash.' },
   { key: 'popStrength',    label: 'Ollie pop',          unit: '×',    min: 0,    max: 3,   step: 0.05,  def: 1.0, help: '' },
   { key: 'spinRate',       label: 'Spin / flip speed', unit: '×',   min: 0.3,  max: 2.5, step: 0.05,  def: 1.0,
@@ -24,7 +24,7 @@ export const SETTINGS_SPEC = [
     help: 'Slow-mo for studying jumps.' },
 ];
 
-const KEY = 'heshsesh.settings.v2';
+const KEY = 'heshsesh.settings.v3';
 
 export function loadSettings() {
   const s = {};

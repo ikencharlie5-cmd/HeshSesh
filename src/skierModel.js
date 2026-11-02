@@ -284,7 +284,7 @@ export class SkierModel {
   update(sk, dt) {
     const k = 1 - Math.exp(-dt * 12);
     this.absorb = Math.max(0, this.absorb - dt * 2.5);
-    const crouchTarget = Math.max(sk.charge / 0.5 * 0.8, sk.grounded ? this.absorb : 0.3);
+    const crouchTarget = Math.max(sk.charge / 0.5 * 0.8, sk.grind ? 0.35 : sk.grounded ? this.absorb : 0.3);
     this.crouch += (crouchTarget - this.crouch) * k;
     this.leanS += ((sk.grounded ? sk.lean : 0) - this.leanS) * k;
     this.edgeS += ((sk.grounded ? sk.edge : 0) - this.edgeS) * k;
@@ -296,26 +296,18 @@ export class SkierModel {
     this.pose(this.crouch, tuck, this.grabS, this.windS);
     this.body.apply(this.joints, -(this.edgeS - this.leanS), this.poleTips);
 
-    const f = this._f.set(sk.heading.x, sk.heading.y, sk.heading.z);
-    const u = this._u;
-    if (sk.grounded) {
-      this.upSmooth.lerp(_a.set(sk.n.x, sk.n.y, sk.n.z), 1 - Math.exp(-dt * 15)).normalize();
+    if (sk.grounded || sk.grind) {
+      const f = this._f.set(sk.heading.x, sk.heading.y, sk.heading.z);
+      const u = this._u;
+      this.upSmooth.lerp(_a.set(sk.n.x, sk.n.y, sk.n.z), 1 - Math.exp(-dt * (sk.grind ? 30 : 15))).normalize();
       u.copy(this.upSmooth);
       u.applyAxisAngle(_c.copy(f).normalize(), this.leanS);
-      this.pitchS = 0;
+      this.root.quaternion.setFromRotationMatrix(this.basisFrom(f, u));
     } else {
-      f.y = 0; f.normalize();
-      const vh = Math.hypot(sk.vel.x, sk.vel.z);
-      const align = vh > 0.1 ? (f.x * sk.vel.x + f.z * sk.vel.z) / vh : 0;
-      const trajPitch = Math.atan2(-sk.vel.y, vh) * align;
-      this.pitchS += (trajPitch - this.pitchS) * k;
-      const right = this._r.crossVectors(f, _up).normalize();
-      u.set(0, 1, 0);
-      const pitch = this.pitchS + sk.flip;
-      f.applyAxisAngle(right, -pitch);
-      u.applyAxisAngle(right, -pitch);
+      // in the air the physics owns the full body orientation
+      this.root.quaternion.set(sk.q.x, sk.q.y, sk.q.z, sk.q.w);
+      this.upSmooth.set(0, 1, 0).applyQuaternion(this.root.quaternion);
     }
-    this.root.quaternion.setFromRotationMatrix(this.basisFrom(f, u));
     this.root.position.set(sk.pos.x, sk.pos.y, sk.pos.z);
   }
 

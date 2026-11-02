@@ -19,7 +19,7 @@ function run(name, startS, controller, maxT = 90, settings = defaultSettings()) 
     maxSpeed = Math.max(maxSpeed, sk.speed());
     for (const e of sk.events.splice(0)) {
       if (e.type === 'land' && e.airTime > 0.25)
-        log.push(`  t=${t.toFixed(1)} s=${(-sk.pos.z).toFixed(0)} LAND air=${e.airTime.toFixed(2)}s spin=${(e.spin * 57.3).toFixed(0)}° flip=${(e.flip * 57.3).toFixed(0)}° h=${e.height.toFixed(1)}m impact=${e.impact.toFixed(1)}m/s q=${e.quality.toFixed(2)}${e.crashed ? ' CRASH' : ''}`);
+        log.push(`  t=${t.toFixed(1)} s=${(-sk.pos.z).toFixed(0)} LAND air=${e.airTime.toFixed(2)}s spin=${(e.spin * 57.3).toFixed(0)}° flip=${(e.flip * 57.3).toFixed(0)}° h=${e.height.toFixed(1)}m impact=${e.impact.toFixed(1)}m/s tilt=${(e.tilt * 57.3).toFixed(0)}°${e.crashed ? ' CRASH' : ''}`);
       if (e.type === 'crash') log.push(`  t=${t.toFixed(1)} s=${(-sk.pos.z).toFixed(0)} CRASH: ${e.reason}`);
     }
     if (t >= nextMark) {

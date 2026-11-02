@@ -17,7 +17,7 @@ function ride(name, x, s, controller, maxT = 40) {
     sk.step(DT, controller(sk, t));
     t += DT; vmax = Math.max(vmax, sk.speed());
     for (const e of sk.events.splice(0)) {
-      if (e.type === 'land' && e.airTime > 0.35) log.push(`  s=${(-sk.pos.z).toFixed(0)} air ${e.airTime.toFixed(2)}s h=${e.height.toFixed(1)}m impact ${e.impact.toFixed(1)} spin ${(e.spin * 57.3).toFixed(0)} flip ${(e.flip * 57.3).toFixed(0)} q=${e.quality.toFixed(2)}${e.crashed ? ' CRASH' : ''}`);
+      if (e.type === 'land' && e.airTime > 0.35) log.push(`  s=${(-sk.pos.z).toFixed(0)} air ${e.airTime.toFixed(2)}s h=${e.height.toFixed(1)}m impact ${e.impact.toFixed(1)} spin ${(e.spin * 57.3).toFixed(0)} flip ${(e.flip * 57.3).toFixed(0)} tilt=${(e.tilt * 57.3).toFixed(0)}°${e.crashed ? ' CRASH' : ''}`);
       if (e.type === 'crash') log.push(`  s=${(-sk.pos.z).toFixed(0)} x=${sk.pos.x.toFixed(0)} CRASH ${e.reason}`);
     }
     if (t >= mark) { log.push(`  t=${t.toFixed(0)} s=${(-sk.pos.z).toFixed(0)} x=${sk.pos.x.toFixed(0)} ${(sk.speed() * 3.6).toFixed(0)} km/h`); mark += 5; }

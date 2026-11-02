@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { createSlopeTerrain } from './terrain.js';
 import { createMountain } from './mountain.js';
+import { createPark } from './park.js';
 import { buildWorld } from './world.js';
 import { Skier } from './skier.js';
 import { SkierModel } from './skierModel.js';
 import { Ragdoll } from './ragdoll.js';
 import { Spray, makeShadow, Tracks } from './fx.js';
-import { scoreLanding } from './tricks.js';
+import { nameLanding, nameGrind } from './tricks.js';
 import { SkiAudio } from './audio.js';
 import { SETTINGS_SPEC, loadSettings, saveSettings, defaultSettings } from './settings.js';
 
@@ -91,7 +92,7 @@ $('btn-close-settings').onclick = () => toggleSettings(false);
 $('btn-menu-settings').onclick = () => toggleSettings(true);
 
 // ------------------------------------------------------------------ world
-const TERRAINS = { mountain: createMountain, slope: createSlopeTerrain };
+const TERRAINS = { mountain: createMountain, park: createPark, slope: createSlopeTerrain };
 const built = {};       // terrain + scene group per mode, built on first use
 let terrain = null, worldGroup = null;
 function useTerrain(mode) {
@@ -146,7 +147,7 @@ function readInput() {
 }
 
 // ------------------------------------------------------------------ state
-const state = { playing: false, paused: false, cp: 0, score: 0, crashTime: 0, trickTimer: 0 };
+const state = { playing: false, paused: false, cp: 0, crashTime: 0, trickTimer: 0 };
 
 function respawn(i) {
   const cp = terrain.checkpoints[i];
@@ -162,8 +163,7 @@ function respawn(i) {
 function startMode(mode) {
   if (!TERRAINS[mode]) return;
   useTerrain(mode);
-  state.playing = true; state.paused = false; state.cp = 0; state.score = 0;
-  $('score').textContent = '0';
+  state.playing = true; state.paused = false; state.cp = 0;
   $('menu').classList.add('hidden');
   $('hud').classList.remove('hidden');
   $('btn-resume').classList.remove('hidden');
@@ -183,29 +183,24 @@ function togglePause(force) {
 function handleEvents() {
   for (const e of skier.events.splice(0)) {
     if (e.type === 'land') {
-      model.absorb = Math.min(0.9, 0.15 + e.impact / 9);
+      model.absorb = Math.min(0.9, 0.15 + e.impact / 12);
       if (e.airTime > 0.15) { $('t-air').textContent = `${e.airTime.toFixed(2)}s · ${e.height.toFixed(1)}m`; burst(Math.min(60, 10 + e.impact * 6)); }
-      if (!e.crashed) {
-        const t = scoreLanding(e);
-        if (t) showTrick(t);
-      }
+      if (!e.crashed) callout(nameLanding(e));
+    } else if (e.type === 'grind') {
+      callout(nameGrind(e));
     } else if (e.type === 'crash') {
       onCrash(e.reason);
     }
   }
 }
 
-function showTrick(t) {
-  state.score += t.score;
-  $('score').textContent = state.score.toLocaleString();
-  $('trick-name').textContent = t.name;
-  $('trick-grade').textContent = t.grade;
-  $('trick-grade').classList.toggle('sketchy', t.grade === 'Sketchy');
-  $('trick-score').textContent = `+${t.score}`;
+function callout(text) {
+  if (!text) return;
+  $('trick-name').textContent = text;
   const el = $('trick');
   el.classList.remove('hidden');
   el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
-  state.trickTimer = 2.0;
+  state.trickTimer = 1.6;
 }
 
 function onCrash(reason) {
@@ -289,6 +284,9 @@ let hudTimer = 0;
 function updateHud(dt) {
   hudTimer -= dt;
   if (state.trickTimer > 0) { state.trickTimer -= dt; if (state.trickTimer <= 0) $('trick').classList.add('hidden'); }
+  const G = skier.grind;
+  $('balance').classList.toggle('hidden', !G);
+  if (G) $('balance-dot').style.left = `${50 + Math.max(-1, Math.min(1, G.phi / 0.8)) * 50}%`;
   if (hudTimer > 0) return; // DOM writes at ~20 Hz are plenty
   hudTimer = 0.05;
   const sk = skier, s = sk.speed();
@@ -300,6 +298,7 @@ function updateHud(dt) {
   hud.g.textContent = `${(sk.grounded ? sk.Nacc / settings.gravity : 0).toFixed(1)} g`;
   let label = 'GLIDE', cls = '';
   if (sk.crashed) label = 'CRASH';
+  else if (sk.grind) { label = sk.grind.r.kind === 'box' ? 'BOX' : 'RAIL'; cls = 'carve'; }
   else if (!sk.grounded) { label = 'AIR'; cls = 'air'; }
   else if (sk.skidding) { label = 'SKID'; cls = 'skid'; }
   else if (sk.carving) { label = 'CARVE'; cls = 'carve'; }

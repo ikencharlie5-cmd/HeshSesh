@@ -10,8 +10,14 @@ export class Spray {
     this.life = new Float32Array(max);
     this.geo = new THREE.BufferGeometry();
     this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    // soft round flakes (a square point sprite looks like confetti up close)
+    const c = document.createElement('canvas'); c.width = c.height = 32;
+    const g = c.getContext('2d');
+    const grd = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.5, 'rgba(255,255,255,0.8)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd; g.fillRect(0, 0, 32, 32);
     this.points = new THREE.Points(this.geo, new THREE.PointsMaterial({
-      color: 0xffffff, size: 0.09, transparent: true, opacity: 0.85, depthWrite: false,
+      color: 0xffffff, size: 0.07, map: new THREE.CanvasTexture(c), transparent: true, opacity: 0.9, depthWrite: false,
     }));
     this.points.frustumCulled = false;
     scene.add(this.points);

@@ -26,7 +26,10 @@ To host it, push the folder to any static host (GitHub Pages, Netlify, etc.). Th
   
   There are 7 checkpoints: keys 1–7, or T for the top.
 - **Test Slope**: one run with a kicker and a roller, for tuning physics.
-- **Terrain Park** (next): rails and boxes with balance, plus a halfpipe.
+- **Terrain Park**: one linear line from the top down.
+  - a rail garden: flat box, flat-down rail, down rail, kinked rail and long box, each ride-on from a small snow ramp
+  - three tables (S/M/L) tuned to land at natural speed
+  - a ~5 m superpipe
 
 ## Controls
 
@@ -44,7 +47,18 @@ To host it, push the folder to any static host (GitHub Pages, Netlify, etc.). Th
 
 WASD also works.
 
-**Air is arcade style.** Hold an arrow to rotate and let go to stop. With nothing held you automatically straighten toward the nearest clean landing (upright, forward or switch). Gravity, takeoff speed and landing impact are still fully simulated, so hitting a jump too fast or too slow still costs you.
+**Air is arcade style.**
+- Hold an arrow to rotate around your own body: ←/→ spin, ↑ backflip, ↓ frontflip.
+- Hold a spin and a flip together and they blend into one off-axis rotation (a cork, or a rodeo going forward).
+- Let go and you settle, lining your skis up with the snow under you.
+- Landings are forgiving. You only crash on a huge impact or landing on your head or back. Landing sideways just turns into a skid.
+- There's no score: the game just calls out what you did.
+
+**Rails and boxes.**
+- Land on them, or ride onto them from the snow ramp.
+- You slide with gravity and rail friction while balancing. ←/→ shifts your weight, and the meter shows your lean.
+- Lean too far and you slip off (no crash). Press Space to pop off the end.
+- Come in with your skis across the rail for a slide, or along it for a grind.
 
 ## The physics model (`src/skier.js`)
 
@@ -72,6 +86,10 @@ node tests/physics-sim.js
 node tests/mountain-sim.js
 ```
 
+```bash
+node tests/park-sim.js
+```
+
 This runs scripted skiers down the slope headlessly (no browser) and prints speeds, airtime, impacts and crashes. It's handy for checking that a tuning change still feels physically sane.
 
 ## Layout
@@ -83,7 +101,8 @@ src/skier.js              ski physics
 src/terrain.js            test slope + tree spatial hash
 src/mountain.js           freeride mountain (height, features, trees, checkpoints)
 src/features.js           kickers / tables / booters as height offsets
-src/world.js              terrain, feature, tree, rock and mountain-range meshes
+src/park.js               terrain park (rails, tables, halfpipe)
+src/world.js              terrain, feature, rail, tree, rock and mountain-range meshes
 src/skierModel.js         procedural low-poly skier
 src/ragdoll.js            Verlet crash ragdoll
 src/tricks.js             trick naming + scoring

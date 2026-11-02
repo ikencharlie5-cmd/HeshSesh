@@ -86,18 +86,19 @@ export function buildWorld(terrain) {
   // ---- features: fine local meshes, lifted a hair, with blue dye on lips and knuckles
   const featMat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
   for (const f of terrain.features) {
-    const step = 0.4;
-    const nu = Math.ceil((f.L + 2) / step) + 1, nv = Math.ceil((2 * f.reach + 2) / step) + 1;
+    const su = f.meshStepU || 0.4, sv = f.meshStepV || 0.4;
+    const nu = Math.ceil((f.L + 2) / su) + 1, nv = Math.ceil((2 * f.reach + 2) / sv) + 1;
     const mesh = gridMesh(nv, nu, (i, j, pos, col, p, c) => {
-      const u = -1 + j * step, v = -(f.reach + 1) + i * step;
+      const u = -1 + j * su, v = -(f.reach + 1) + i * sv;
       const x = f.x0 + f.a.x * u + f.b.x * v, z = f.z0 + f.a.z * u + f.b.z * v;
       const o = f.offset(x, z);
       pos[p] = x; pos[p + 1] = terrain.height(x, z) + 0.02; pos[p + 2] = z;
       terrain.normal(x, z, nrm);
-      snowColor(c, 1 - nrm.y, 0, hash(x, z) * 0.5);
+      snowColor(c, Math.min(1 - nrm.y, 0.25), 0, hash(x, z) * 0.5); // built features are all snow, never rock
       const lipLine = u > f.Lr - 0.5 && u < f.Lr && Math.abs(v) < f.W / 2;
       const knuckle = f.table > 0 && u > f.Lr + f.table - 0.25 && u < f.Lr + f.table + 0.25 && Math.abs(v) < f.W / 2;
-      if (lipLine || knuckle) c.lerp(DYE, 0.85);
+      const coping = f.kind === 'pipe' && Math.abs(v) > f.wallEnd + 0.05 && Math.abs(v) < f.wallEnd + 0.45 && f.fade(u) > 0.9;
+      if (lipLine || knuckle || coping) c.lerp(DYE, 0.85);
       if (o <= 0) c.copy(SNOW);
       col[p] = c.r; col[p + 1] = c.g; col[p + 2] = c.b;
     }, featMat);
@@ -108,6 +109,7 @@ export function buildWorld(terrain) {
   // ---- trees: one merged, vertex-colored geometry instanced (trunk + 3 frosted tiers)
   if (terrain.trees.length) group.add(buildTrees(terrain));
   if (terrain.rocks && terrain.rocks.length) group.add(buildRocks(terrain));
+  if (terrain.rails) group.add(buildRails(terrain));
 
   // ---- checkpoint flags
   const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 2.4, 5).translate(0, 1.2, 0);
@@ -221,7 +223,8 @@ function buildRange(terrain) {
     const cx = Math.min(Math.max(x, B.x0), B.x1), cz = Math.min(Math.max(z, B.z1), B.z0);
     const d = Math.hypot(x - cx, z - cz);
     const edge = terrain.baseHeight(cx, cz);
-    return edge + smooth(d / 500) * (60 + 520 * ridge(x, z)) + d * 0.08;
+    // a wide apron of foothills first, then the peaks
+    return edge + smooth(d / 300) * 25 * ridge(x * 3, z * 3) + smooth((d - 180) / 600) * (60 + 520 * ridge(x, z)) + d * 0.04;
   };
   const inside = (x, z) => x > B.x0 + 1 && x < B.x1 - 1 && z < B.z0 - 1 && z > B.z1 + 1;
   const pos = [], col = [];
@@ -251,4 +254,54 @@ function buildRange(terrain) {
   geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
   return mesh;
+}
+
+// Rails (round steel tube) and boxes (flat top plate on a coloured body),
+// with posts down into the snow.
+function buildRails(terrain) {
+  const g = new THREE.Group();
+  const steel = new THREE.MeshPhongMaterial({ color: 0xd4dae0, emissive: 0x30363d, shininess: 80, specular: 0xffffff });
+  const post = new THREE.MeshLambertMaterial({ color: 0x2d3138 });
+  const boxBody = new THREE.MeshLambertMaterial({ color: 0x2f6fe0 });
+  const boxTop = new THREE.MeshPhongMaterial({ color: 0xf2f4f7, shininess: 40 });
+  const up = new THREE.Vector3(0, 1, 0), A = new THREE.Vector3(), B = new THREE.Vector3(), D = new THREE.Vector3();
+  for (const r of terrain.rails) {
+    for (const sg of r.segs) {
+      A.set(sg.a.x, sg.a.y, sg.a.z); B.set(sg.b.x, sg.b.y, sg.b.z);
+      D.subVectors(B, A);
+      const len = D.length(); D.normalize();
+      const mid = A.clone().add(B).multiplyScalar(0.5);
+      if (r.kind === 'rail') {
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, len + 0.1, 10), steel);
+        m.position.copy(mid).addScaledVector(up, -0.045);
+        m.quaternion.setFromUnitVectors(up, D);
+        g.add(m);
+      } else {
+        // box: align length with the segment, keep the top flat across
+        const side = new THREE.Vector3().crossVectors(D, up).normalize();
+        const top = new THREE.Vector3().crossVectors(side, D).normalize();
+        const basis = new THREE.Matrix4().makeBasis(side, top, D);
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.3, len), boxBody);
+        body.position.copy(mid).addScaledVector(top, -0.17);
+        body.quaternion.setFromRotationMatrix(basis);
+        const plate = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.03, len), boxTop);
+        plate.position.copy(mid).addScaledVector(top, -0.015);
+        plate.quaternion.setFromRotationMatrix(basis);
+        g.add(body, plate);
+      }
+      // support posts every ~2.5 m
+      const nPosts = Math.max(1, Math.round(len / 2.5));
+      for (let i = 0; i <= nPosts; i++) {
+        const p = A.clone().lerp(B, i / nPosts);
+        const snow = terrain.baseHeight(p.x, p.z);
+        const h = p.y - snow - (r.kind === 'box' ? 0.3 : 0.05);
+        if (h < 0.05) continue;
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, h, 6), post);
+        m.position.set(p.x, snow + h / 2, p.z);
+        g.add(m);
+      }
+    }
+  }
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
+  return g;
 }
