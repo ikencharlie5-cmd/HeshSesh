@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { createSlopeTerrain, buildTerrainMesh } from './terrain.js';
+import { createSlopeTerrain } from './terrain.js';
+import { createMountain } from './mountain.js';
+import { buildWorld } from './world.js';
 import { Skier } from './skier.js';
 import { SkierModel } from './skierModel.js';
 import { Ragdoll } from './ragdoll.js';
@@ -23,8 +25,8 @@ $('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 120, 900);
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 2500);
+scene.fog = new THREE.Fog(SKY, 250, 2200);
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 5000);
 // Three's Lambert divides by π, so these intensities sum to ~1 on flat snow.
 scene.add(new THREE.HemisphereLight(0xd6e4ff, 0x6f7f9f, 0.95));
 const sun = new THREE.DirectionalLight(0xfff1dc, 2.1);
@@ -38,11 +40,11 @@ scene.add(sun, sun.target);
 
 // sky dome: vertex-colored gradient, follows the camera
 const sky = (() => {
-  const g = new THREE.SphereGeometry(1200, 24, 12);
+  const g = new THREE.SphereGeometry(4000, 24, 12);
   const col = [], top = new THREE.Color(0x3f78c0), mid = new THREE.Color(0x8fb8e6), hor = new THREE.Color(SKY);
   const p = g.attributes.position, c = new THREE.Color();
   for (let i = 0; i < p.count; i++) {
-    const h = p.getY(i) / 1200;
+    const h = p.getY(i) / 4000;
     if (h > 0.25) c.copy(mid).lerp(top, Math.min(1, (h - 0.25) / 0.6));
     else c.copy(hor).lerp(mid, Math.max(0, h / 0.25));
     col.push(c.r, c.g, c.b);
@@ -89,36 +91,30 @@ $('btn-close-settings').onclick = () => toggleSettings(false);
 $('btn-menu-settings').onclick = () => toggleSettings(true);
 
 // ------------------------------------------------------------------ world
-const terrain = createSlopeTerrain();
-scene.add(buildTerrainMesh(THREE, terrain));
-addBackdrop();
+const TERRAINS = { mountain: createMountain, slope: createSlopeTerrain };
+const built = {};       // terrain + scene group per mode, built on first use
+let terrain = null, worldGroup = null;
+function useTerrain(mode) {
+  if (!built[mode]) {
+    const t = TERRAINS[mode]();
+    built[mode] = { terrain: t, group: buildWorld(t) };
+  }
+  if (worldGroup) scene.remove(worldGroup);
+  terrain = built[mode].terrain;
+  worldGroup = built[mode].group;
+  scene.add(worldGroup);
+  skier.terrain = terrain;
+  ragdoll.terrain = terrain;
+}
 
-const skier = new Skier(terrain, settings);
+const skier = new Skier(createSlopeTerrain(), settings);
 const model = new SkierModel(scene);
-const ragdoll = new Ragdoll(scene, terrain, settings);
+const ragdoll = new Ragdoll(scene, skier.terrain, settings);
 const spray = new Spray(scene);
 const shadow = makeShadow(scene);
 const tracks = new Tracks(scene);
 const audio = new SkiAudio();
-
-function addBackdrop() {
-  const geo = new THREE.ConeGeometry(1, 1, 7);
-  const mat = new THREE.MeshLambertMaterial({ color: 0xf2f6fb, flatShading: true });
-  let seed = 7;
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 26; i++) {
-    const side = i % 2 ? 1 : -1;
-    const m = new THREE.Mesh(geo, mat);
-    const h = 150 + rnd() * 260;
-    m.scale.set(h * (0.9 + rnd() * 0.6), h, h * (0.9 + rnd() * 0.6));
-    m.position.set(side * (260 + rnd() * 380), -260 + h / 2 + rnd() * 60, 100 - rnd() * 1250);
-    m.rotation.y = rnd() * 6;
-    scene.add(m);
-  }
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshLambertMaterial({ color: 0xdfe9f3 }));
-  floor.rotation.x = -Math.PI / 2; floor.position.set(0, -262, -500);
-  scene.add(floor);
-}
+useTerrain('mountain');
 
 // ------------------------------------------------------------------ input
 const keys = new Set();
@@ -133,6 +129,7 @@ addEventListener('keydown', (e) => {
   if (!state.playing) return;
   if (e.code === 'KeyR' || (e.code === 'Space' && skier.crashed && state.crashTime > 0.4)) respawn(state.cp);
   if (e.code.startsWith('Digit')) { const i = +e.code.slice(5) - 1; if (i >= 0 && i < terrain.checkpoints.length) { state.cp = i; respawn(i); } }
+  if (e.code === 'KeyT') { state.cp = 0; respawn(0); } // back to the top
   if (e.code === 'KeyP') toggleSettings();
   if (e.code === 'KeyM') audio.muted = !audio.muted;
 });
@@ -153,7 +150,7 @@ const state = { playing: false, paused: false, cp: 0, score: 0, crashTime: 0, tr
 
 function respawn(i) {
   const cp = terrain.checkpoints[i];
-  skier.reset({ x: 0, y: 0, z: -cp.s }, { x: 0, y: 0, z: -1 });
+  skier.reset({ x: cp.x, y: 0, z: cp.z }, { x: 0, y: 0, z: -1 });
   ragdoll.stop();
   model.visible = true;
   tracks.lift();
@@ -163,7 +160,8 @@ function respawn(i) {
 }
 
 function startMode(mode) {
-  if (mode !== 'slope') return;
+  if (!TERRAINS[mode]) return;
+  useTerrain(mode);
   state.playing = true; state.paused = false; state.cp = 0; state.score = 0;
   $('score').textContent = '0';
   $('menu').classList.add('hidden');
@@ -285,7 +283,7 @@ function updateCamera(dt) {
 
 // ------------------------------------------------------------------ HUD
 const hud = {
-  kmh: $('speed-kmh'), ms: $('speed-ms'), slope: $('t-slope'), edge: $('t-edge'), slip: $('t-slip'), g: $('t-g'), st: $('t-state'), wind: $('t-wind'),
+  kmh: $('speed-kmh'), ms: $('speed-ms'), slope: $('t-slope'), edge: $('t-edge'), slip: $('t-slip'), g: $('t-g'), st: $('t-state'),
 };
 let hudTimer = 0;
 function updateHud(dt) {
@@ -300,12 +298,6 @@ function updateHud(dt) {
   hud.edge.textContent = `${Math.round(Math.abs(sk.edge) * 57.3)}°`;
   hud.slip.textContent = `${Math.round(sk.slip * 57.3)}°`;
   hud.g.textContent = `${(sk.grounded ? sk.Nacc / settings.gravity : 0).toFixed(1)} g`;
-  // wind-up shown as the spin/flip it would start at full rate per second of air
-  const ws = sk.grounded ? sk.windSpin : 0, wf = sk.grounded ? sk.windFlip : 0;
-  const parts = [];
-  if (Math.abs(ws) > 0.02) parts.push(`${ws > 0 ? '↻' : '↺'} ${Math.round(Math.abs(ws) * 7.5 * settings.spinRate * 57.3)}°/s`);
-  if (Math.abs(wf) > 0.02) parts.push(`${wf < 0 ? 'back' : 'front'} ${Math.round(Math.abs(wf) * 6 * settings.spinRate * 57.3)}°/s`);
-  hud.wind.textContent = parts.length ? parts.join(' ') : '–';
   let label = 'GLIDE', cls = '';
   if (sk.crashed) label = 'CRASH';
   else if (!sk.grounded) { label = 'AIR'; cls = 'air'; }
@@ -341,10 +333,12 @@ function frame(now) {
       state.crashTime += simDt;
       if (ragdoll.settled && state.crashTime > 1.2) respawn(state.cp);
     } else {
-      // checkpoint progress
-      const s = -skier.pos.z, cps = terrain.checkpoints;
-      if (skier.grounded && state.cp + 1 < cps.length && s > cps[state.cp + 1].s) {
-        state.cp++; $('checkpoint').textContent = `Checkpoint: ${cps[state.cp].label}`;
+      // ride through a checkpoint's flags to make it your respawn point
+      const cps = terrain.checkpoints;
+      for (let i = 0; i < cps.length; i++) {
+        if (i !== state.cp && skier.grounded && Math.hypot(skier.pos.x - cps[i].x, skier.pos.z - cps[i].z) < 12) {
+          state.cp = i; $('checkpoint').textContent = `Checkpoint: ${cps[i].label}`;
+        }
       }
     }
     model.update(skier, simDt);
@@ -370,9 +364,10 @@ function frame(now) {
   } else if (!debug.freeCam) {
     audio.update(0, 0, true);
     // idle flyby behind the menu
-    const t = now / 1000;
-    camera.position.set(Math.sin(t * 0.1) * 30, 25 - 40, -120 + Math.cos(t * 0.1) * 20);
-    camera.lookAt(0, -70, -330);
+    const t = now / 1000, c0 = terrain.checkpoints[0];
+    const y0 = terrain.height(c0.x, c0.z);
+    camera.position.set(c0.x + Math.sin(t * 0.05) * 60, y0 + 45, c0.z + 60 + Math.cos(t * 0.05) * 30);
+    camera.lookAt(c0.x, y0 - 120, c0.z - 400);
   }
   sky.position.copy(camera.position);
   renderer.render(scene, camera);
@@ -380,4 +375,4 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // expose for debugging in the console
-window.heshsesh = { skier, settings, terrain, state, camera, debug };
+window.heshsesh = { skier, settings, get terrain() { return terrain; }, state, camera, debug };

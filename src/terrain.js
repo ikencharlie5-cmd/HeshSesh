@@ -115,92 +115,32 @@ export function createSlopeTerrain() {
   return {
     name: 'Test Slope',
     length, halfWidth,
-    height, normal, trees, checkpoints,
+    bounds: { minX: -halfWidth, maxX: halfWidth, minZ: -(length - 2), maxZ: 15 },
+    mesh: { x0: -halfWidth, x1: halfWidth, z0: 20, z1: -length - 20, dx: 2.5, dz: 1 },
+    height, baseHeight: height, normal, trees, features: [], rocks: [],
+    checkpoints: checkpoints.map((c) => ({ ...c, x: 0, z: -c.s })),
+    treesNear: treeGrid(trees),
     pitchAt: (s) => { pi = 0; return pitchAt(s); },
     powder: () => 0, // fraction 0..1 of powder at a location (none on the test slope)
   };
 }
 
-// Build the visual mesh. THREE is passed in so this file stays Node-importable.
-export function buildTerrainMesh(THREE, terrain) {
-  const { length, halfWidth } = terrain;
-  const dz = 1.0, dx = 2.5;
-  const nx = Math.round((halfWidth * 2) / dx) + 1;
-  const nz = Math.round((length + 40) / dz) + 1;
-  const pos = new Float32Array(nx * nz * 3);
-  const col = new Float32Array(nx * nz * 3);
-  const nrm = { x: 0, y: 1, z: 0 };
-  const tmpC = new THREE.Color();
-  let p = 0;
-  for (let j = 0; j < nz; j++) {
-    const z = 20 - j * dz;
-    for (let i = 0; i < nx; i++) {
-      const x = -halfWidth + i * dx;
-      const y = terrain.height(x, z);
-      pos[p] = x; pos[p + 1] = y; pos[p + 2] = z;
-      terrain.normal(x, z, nrm);
-      // steeper = slightly bluer/darker snow, helps read the slope
-      const steep = 1 - nrm.y;
-      // a little per-vertex grain so speed and terrain shape read in motion
-      const grain = ((Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1) * 0.025;
-      const t = Math.min(1, steep * 5);                    // 0 flat .. 1 at ~37°
-      tmpC.setRGB(0.96 - 0.12 * t + grain, 0.975 - 0.08 * t + grain, 1.0 - 0.02 * t + grain, THREE.SRGBColorSpace);
-      col[p] = tmpC.r; col[p + 1] = tmpC.g; col[p + 2] = tmpC.b;
-      p += 3;
-    }
+// Spatial hash so tree collision checks only look at nearby trees.
+export function treeGrid(trees, cell = 10) {
+  const grid = new Map();
+  for (const t of trees) {
+    const k = `${Math.floor(t.x / cell)},${Math.floor(t.z / cell)}`;
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(t);
   }
-  const idx = new Uint32Array((nx - 1) * (nz - 1) * 6);
-  let q = 0;
-  for (let j = 0; j < nz - 1; j++) {
-    for (let i = 0; i < nx - 1; i++) {
-      const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
-      // counter-clockwise seen from above (+y) so faces point up
-      idx[q++] = a; idx[q++] = b; idx[q++] = c;
-      idx[q++] = b; idx[q++] = d; idx[q++] = c;
+  const out = [];
+  return (x, z) => {
+    out.length = 0;
+    const cx = Math.floor(x / cell), cz = Math.floor(z / cell);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      const l = grid.get(`${cx + i},${cz + j}`);
+      if (l) for (const t of l) out.push(t);
     }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  geo.computeVertexNormals();
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.receiveShadow = true;
-
-  const group = new THREE.Group();
-  group.add(mesh);
-
-  // trees as two instanced meshes (trunk + canopy) = 2 draw calls
-  const trunkGeo = new THREE.CylinderGeometry(0.25, 0.35, 1, 5);
-  trunkGeo.translate(0, 0.5, 0);
-  const canopyGeo = new THREE.ConeGeometry(1, 1, 6);
-  canopyGeo.translate(0, 0.5, 0);
-  const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshLambertMaterial({ color: 0x5a3d2b, flatShading: true }), terrain.trees.length);
-  const canopies = new THREE.InstancedMesh(canopyGeo, new THREE.MeshLambertMaterial({ color: 0x2c5a3c, flatShading: true }), terrain.trees.length);
-  const m = new THREE.Matrix4(), qt = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
-  terrain.trees.forEach((t, i) => {
-    const y = terrain.height(t.x, t.z) - 0.3;
-    ps.set(t.x, y, t.z); sc.set(1, t.h * 0.3, 1); m.compose(ps, qt, sc); trunks.setMatrixAt(i, m);
-    ps.set(t.x, y + t.h * 0.22, t.z); sc.set(t.h * 0.28, t.h * 0.85, t.h * 0.28); m.compose(ps, qt, sc); canopies.setMatrixAt(i, m);
-  });
-  group.add(trunks, canopies);
-
-  // checkpoint flags
-  const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 2.4, 4); poleGeo.translate(0, 1.2, 0);
-  const flagGeo = new THREE.PlaneGeometry(1.0, 0.6); flagGeo.translate(0.5, 2.1, 0);
-  const poleMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
-  const flagMat = new THREE.MeshBasicMaterial({ color: 0xff6a00, side: THREE.DoubleSide });
-  for (const cp of terrain.checkpoints) {
-    for (const x of [-14, 14]) {
-      const z = -cp.s;
-      const pole = new THREE.Mesh(poleGeo, poleMat);
-      pole.position.set(x, terrain.height(x, z), z);
-      const flag = new THREE.Mesh(flagGeo, flagMat);
-      flag.position.copy(pole.position);
-      if (x > 0) flag.rotation.y = Math.PI;
-      group.add(pole, flag);
-    }
-  }
-  return group;
+    return out;
+  };
 }

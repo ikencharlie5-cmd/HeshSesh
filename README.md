@@ -15,11 +15,18 @@ Then open http://localhost:8080 in Chrome. (`npm run dev` does the same thing.) 
 
 To host it, push the folder to any static host (GitHub Pages, Netlify, etc.). Three.js is vendored in `vendor/`, so it doesn't need a CDN.
 
-## Status: step 1, the test slope
+## Modes
 
-One run with a steep pitch, a long mellow section, a natural kicker (25° lip, short table, 30° landing), a roller, flats, and an uphill section at the bottom. It also has tree obstacles and 4 checkpoints.
-
-Next steps: **2. Terrain Park** (kickers, rails/boxes, halfpipe), then **3. Freeride mountain** (cliffs, powder, multiple runs).
+- **Mountain**: a hand-built freeride mountain about 1.6 km long. It has:
+  - a summit and an open powder bowl (deep snow is slower)
+  - a groomed main run, two natural gullies, and two cliff bands with rock faces
+  - forests that get thicker lower down
+  - natural booters scattered on the runs
+  - a four-table **Jump Line** (S/M/L/XL, with blue-dyed lips and knuckles)
+  
+  There are 7 checkpoints: keys 1–7, or T for the top.
+- **Test Slope**: one run with a kicker and a roller, for tuning physics.
+- **Terrain Park** (next): rails and boxes with balance, plus a halfpipe.
 
 ## Controls
 
@@ -37,12 +44,7 @@ Next steps: **2. Terrain Park** (kickers, rails/boxes, halfpipe), then **3. Free
 
 WASD also works.
 
-**Air control is realistic.** Rotation is decided on the snow:
-- Hold Space to crouch. While crouched, the arrows wind up your upper body instead of steering. Hold an arrow longer for more rotation; the HUD shows the wind-up.
-- Release Space at the lip. The pop launches you with that spin or flip.
-- If you're already carving when you leave the snow, that rotation carries into the air too.
-- In the air, angular momentum is conserved. The arrows only nudge it a little (the **Air control** slider sets how much). Grabbing pulls you in tighter, so you spin faster.
-- Keys you were already holding at takeoff don't count until you press them again.
+**Air is arcade style.** Hold an arrow to rotate and let go to stop. With nothing held you automatically straighten toward the nearest clean landing (upright, forward or switch). Gravity, takeoff speed and landing impact are still fully simulated, so hitting a jump too fast or too slow still costs you.
 
 ## The physics model (`src/skier.js`)
 
@@ -66,6 +68,10 @@ Everything above is tunable live in the **⚙ Physics** panel: gravity, glide fr
 node tests/physics-sim.js
 ```
 
+```bash
+node tests/mountain-sim.js
+```
+
 This runs scripted skiers down the slope headlessly (no browser) and prints speeds, airtime, impacts and crashes. It's handy for checking that a tuning change still feels physically sane.
 
 ## Layout
@@ -74,7 +80,10 @@ This runs scripted skiers down the slope headlessly (no browser) and prints spee
 index.html, style.css     UI shell (menu, HUD, settings)
 src/main.js               loop (fixed 120 Hz physics), camera, HUD, events
 src/skier.js              ski physics
-src/terrain.js            height function + mesh + trees + checkpoints
+src/terrain.js            test slope + tree spatial hash
+src/mountain.js           freeride mountain (height, features, trees, checkpoints)
+src/features.js           kickers / tables / booters as height offsets
+src/world.js              terrain, feature, tree, rock and mountain-range meshes
 src/skierModel.js         procedural low-poly skier
 src/ragdoll.js            Verlet crash ragdoll
 src/tricks.js             trick naming + scoring

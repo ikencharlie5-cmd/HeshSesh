@@ -84,7 +84,7 @@ export class Ragdoll {
         }
       }
     }
-    for (const t of T.trees) {
+    for (const t of T.treesNear(this.p[J.chest].x, this.p[J.chest].z)) {
       for (const q of this.p) {
         const dx = q.x - t.x, dz = q.z - t.z;
         if (Math.abs(dx) > 1 || Math.abs(dz) > 1) continue;

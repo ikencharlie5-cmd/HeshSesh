@@ -39,17 +39,7 @@ export class Skier {
     this.n = v3(0, 1, 0);
     this.events = [];
     this._f = v3(); this._r = v3(); this._t = v3(); this._tmp = v3(); this._g = v3();
-    this.buildTreeGrid();
     this.reset(v3(0, 0, -10), v3(0, 0, -1));
-  }
-
-  buildTreeGrid() {
-    this.treeGrid = new Map();
-    for (const t of this.terrain.trees) {
-      const k = `${Math.floor(t.x / 10)},${Math.floor(t.z / 10)}`;
-      if (!this.treeGrid.has(k)) this.treeGrid.set(k, []);
-      this.treeGrid.get(k).push(t);
-    }
   }
 
   reset(pos, dir) {
@@ -95,11 +85,11 @@ export class Skier {
     else this.stepAir(dt, input);
     this.collideTrees();
     // world bounds
-    const T = this.terrain;
-    if (this.pos.z < -(T.length - 2)) { this.pos.z = -(T.length - 2); if (this.vel.z < 0) this.vel.z = 0; }
-    if (this.pos.z > 15) { this.pos.z = 15; if (this.vel.z > 0) this.vel.z = 0; }
-    const hw = T.halfWidth - 1;
-    if (Math.abs(this.pos.x) > hw) { this.pos.x = Math.sign(this.pos.x) * hw; this.vel.x = 0; }
+    const B = this.terrain.bounds;
+    if (this.pos.z < B.minZ) { this.pos.z = B.minZ; if (this.vel.z < 0) this.vel.z = 0; }
+    if (this.pos.z > B.maxZ) { this.pos.z = B.maxZ; if (this.vel.z > 0) this.vel.z = 0; }
+    if (this.pos.x < B.minX + 1) { this.pos.x = B.minX + 1; if (this.vel.x < 0) this.vel.x = 0; }
+    if (this.pos.x > B.maxX - 1) { this.pos.x = B.maxX - 1; if (this.vel.x > 0) this.vel.x = 0; }
   }
 
   // ---------------------------------------------------------------------
@@ -121,20 +111,10 @@ export class Skier {
     if (speed > 1.5) this.switch = dirSign < 0;
     const charging = inp.jump;
     const headingBefore = copy(this._hb || (this._hb = v3()), f);
-    // While crouched for an ollie the arrows wind the upper body up instead of
-    // steering: skis run flat and straight, rotation gets stored for the pop.
     const steerRaw = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
-    const flipRaw = (inp.down ? 1 : 0) - (inp.up ? 1 : 0);
-    if (charging) {
-      // ~1.2 s to wind up fully: hold longer = more rotation
-      this.windSpin = approach(this.windSpin, steerRaw ? steerRaw : this.windSpin, 0.85 * dt);
-      this.windFlip = approach(this.windFlip, flipRaw ? flipRaw : this.windFlip, 0.85 * dt);
-    } else {
-      this.windSpin = approach(this.windSpin, 0, 4 * dt);
-      this.windFlip = approach(this.windFlip, 0, 4 * dt);
-    }
-    const steer = charging ? 0 : steerRaw;
-    const braking = !charging && inp.down && speed > 1.5;   // ↓ = skid / stop
+    this.windSpin = 0; this.windFlip = 0;
+    const steer = steerRaw;
+    const braking = inp.down && speed > 1.5;   // ↓ = skid / stop
 
     // ---- edge angle (rate-limited: it takes time to roll the skis over)
     let edgeTarget;
@@ -145,7 +125,7 @@ export class Skier {
       edgeTarget = steer * MAX_EDGE * clamp(0.35 + speed / 12, 0, 1);
     }
     this.edge = approach(this.edge, edgeTarget, 3.2 * dt);
-    this.tuck = approach(this.tuck, inp.up && !braking && !charging && speed > 3 ? 1 : 0, 4 * dt); // ↑ = tuck
+    this.tuck = approach(this.tuck, inp.up && !braking && speed > 3 ? 1 : 0, 4 * dt); // ↑ = tuck
 
     // ---- travel frame (velocity direction) & slip angle
     const travel = this._t;
@@ -205,12 +185,13 @@ export class Skier {
     vr += gr * dt;
 
     // ---- skating / pole push on flats
-    if (inp.up && !charging && speed < 5 && Math.abs(gf) < 2.5 && !braking) vf += (this.switch ? -1 : 1) * 2.6 * dt;
+    if (inp.up && speed < 5 && Math.abs(gf) < 2.5 && !braking) vf += (this.switch ? -1 : 1) * 2.6 * dt;
 
     // ---- snow friction (Coulomb, ∝ normal force)
     const N = clamp(this.Nacc, 0, 6 * g);
     const powder = T.powder(this.pos.x, this.pos.z);
-    const glideMu = S.snowFriction * (1 + 1.5 * powder) + (braking ? 0.05 : 0);
+    const glideMu = S.snowFriction * (1 + 1.2 * powder) + (braking ? 0.05 : 0);
+    this.powder = powder;
     vf = approach(vf, 0, glideMu * N * dt);
     // sideways: flat ski slips easily, an edged ski bites
     const latMu = S.skidFriction * (0.45 + 0.9 * Math.sin(aEdge));
@@ -224,7 +205,7 @@ export class Skier {
     // ---- air drag (+ powder plowing drag)
     speed = Math.hypot(vf, vr);
     const CdA = (0.55 - 0.33 * this.tuck + (braking ? 0.12 : 0)) * S.dragScale;
-    const aDrag = 0.5 * RHO * CdA * speed * speed / MASS + powder * 0.9 * speed;
+    const aDrag = 0.5 * RHO * CdA * speed * speed / MASS + powder * 0.09 * speed;
     if (speed > 1e-3) {
       const k = Math.max(0, 1 - aDrag * dt / speed);
       vf *= k; vr *= k;
@@ -282,8 +263,8 @@ export class Skier {
     // Rotation is decided on the snow: whatever the skis were already turning
     // at (a carve) plus the wind-up you release with the pop. In the air you
     // can only fine-tune it (arms, tucking tighter).
-    this.spinMom = this.yawRate * 0.8;
-    this.airArm = { left: !inp.left, right: !inp.right, up: !inp.up, down: !inp.down };
+    this.spinRate = this.yawRate * 0.5; this.flipRate = 0;
+    this.airArm = { left: true, right: true, up: !inp.up, down: !inp.down };
     this.flipMom = 0;
     if (popped) this.releaseWind();
     else if (inp.jump && this.charge > 0) this.coyote = { charge: this.charge, spin: this.windSpin, flip: this.windFlip };
@@ -296,8 +277,8 @@ export class Skier {
 
   releaseWind(spin = this.windSpin, flip = this.windFlip) {
     const S = this.S;
-    this.spinMom += spin * 7.5 * S.spinRate;
-    this.flipMom += flip * 6.0 * S.spinRate;
+    this.spinRate += spin * 6 * S.spinRate;
+    this.flipRate += flip * 5 * S.spinRate;
   }
 
   // ---------------------------------------------------------------------
@@ -321,23 +302,28 @@ export class Skier {
     }
     this.jumpWasHeld = inp.jump;
 
-    // Angular momentum is conserved. Arms give a small corrective torque
-    // (strength = "Air control" setting); grabbing pulls the body in, which
-    // lowers the moment of inertia and speeds the rotation up (like a skater).
-    // keys still held from the snow (tuck, a turn) don't count until pressed again
+    // Arcade air: hold an arrow and you rotate, let go and you stop.
+    // With nothing held you auto-straighten toward the nearest clean landing
+    // (flips to upright, spins to forward or switch).
     const A = this.airArm;
     for (const k of ['left', 'right', 'up', 'down']) if (!inp[k]) A[k] = true;
-    const steer = (inp.right && A.right ? 1 : 0) - (inp.left && A.left ? 1 : 0);
-    const flipIn = (inp.down && A.down ? 1 : 0) - (inp.up && A.up ? 1 : 0); // down = front flip, up = back flip
+    const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+    const flipIn = (inp.down && A.down ? 1 : 0) - (inp.up && A.up ? 1 : 0); // ↓ front flip, ↑ back flip
     this.grabbing = !!inp.grab;
     if (this.grabbing) this.grabTime += dt;
-    const torque = 2.0 * S.airControl * dt;
-    const spinMax = 7.5 * S.spinRate, flipMax = 6.0 * S.spinRate;
-    if (steer) this.spinMom = clamp(this.spinMom + steer * torque, -spinMax, spinMax);
-    if (flipIn) this.flipMom = clamp(this.flipMom + flipIn * torque, -flipMax, flipMax);
-    const inertia = this.grabbing ? 1 / 1.3 : 1;
-    this.spinRate = this.spinMom / inertia;
-    this.flipRate = this.flipMom / inertia;
+    const boost = this.grabbing ? 1.15 : 1;
+    const spinMax = 11 * S.spinRate * boost, flipMax = 8.5 * S.spinRate * boost;
+    const acc = 60 * S.airControl;
+    if (steer) this.spinRate = approach(this.spinRate, steer * spinMax, acc * dt);
+    else {
+      const res = this.spin - Math.round(this.spin / Math.PI) * Math.PI;
+      this.spinRate = approach(this.spinRate, clamp(-res * 7, -4, 4), acc * 0.8 * dt);
+    }
+    if (flipIn) this.flipRate = approach(this.flipRate, flipIn * flipMax, acc * 0.8 * dt);
+    else {
+      const res = this.flip - Math.round(this.flip / (2 * Math.PI)) * 2 * Math.PI;
+      this.flipRate = approach(this.flipRate, clamp(-res * 6, -4, 4), acc * 0.7 * dt);
+    }
     this.spin += this.spinRate * dt;
     this.flip += this.flipRate * dt;
     rotateAxis(this.heading, { x: 0, y: 1, z: 0 }, -this.spinRate * dt);
@@ -369,10 +355,10 @@ export class Skier {
     const tangential = Math.sqrt(Math.max(0, dot(v, v) - vn * vn));
     let reason = null;
     if (impact > S.landingTolerance) reason = impact > S.landingTolerance * 1.6 ? 'Flat landing — legs gave out' : 'Landed too hard';
-    else if (Math.abs(flipRes) > 55 * DEG) reason = flipRes > 0 ? 'Over-rotated' : 'Under-rotated';
-    else if (Math.abs(spinRes) > 40 * DEG && tangential > 4) reason = 'Landed sideways';
+    else if (Math.abs(flipRes) > 65 * DEG) reason = flipRes > 0 ? 'Over-rotated' : 'Under-rotated';
+    else if (Math.abs(spinRes) > 55 * DEG && tangential > 4) reason = 'Landed sideways';
 
-    const quality = 1 - Math.max(impact / S.landingTolerance, Math.abs(flipRes) / (55 * DEG), Math.abs(spinRes) / (40 * DEG));
+    const quality = 1 - Math.max(impact / S.landingTolerance, Math.abs(flipRes) / (65 * DEG), Math.abs(spinRes) / (55 * DEG));
     const info = {
       type: 'land', airTime, spin: this.spin, flip: this.flip, grabTime: this.grabTime,
       impact, quality: clamp(quality, 0, 1), height: this.maxAirHeight, speed: len(v), crashed: !!reason,
@@ -398,11 +384,8 @@ export class Skier {
 
   collideTrees() {
     const p = this.pos;
-    const cx = Math.floor(p.x / 10), cz = Math.floor(p.z / 10);
-    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
-      const list = this.treeGrid.get(`${cx + i},${cz + j}`);
-      if (!list) continue;
-      for (const t of list) {
+    {
+      for (const t of this.terrain.treesNear(p.x, p.z)) {
         const dx = p.x - t.x, dz = p.z - t.z;
         const d = Math.hypot(dx, dz);
         const rr = t.r + 0.35;

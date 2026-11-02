@@ -13,18 +13,18 @@ export const SETTINGS_SPEC = [
     help: 'Smaller = tighter carved turns (slalom ski ≈ 12 m, GS ≈ 25 m).' },
   { key: 'skidFriction',   label: 'Skid friction',      unit: '',     min: 0.1,  max: 1.5, step: 0.05,  def: 0.9,
     help: 'Friction when the ski slides sideways. Higher = skids scrub more speed.' },
-  { key: 'landingTolerance', label: 'Landing tolerance', unit: 'm/s', min: 3,    max: 25,  step: 0.5,   def: 9,
+  { key: 'landingTolerance', label: 'Landing tolerance', unit: 'm/s', min: 3,    max: 25,  step: 0.5,   def: 12,
     help: 'Max impact speed into the slope your legs can absorb before you crash.' },
   { key: 'popStrength',    label: 'Ollie pop',          unit: '×',    min: 0,    max: 3,   step: 0.05,  def: 1.0, help: '' },
-  { key: 'spinRate',       label: 'Spin / flip wind-up', unit: '×',   min: 0.3,  max: 2.5, step: 0.05,  def: 1.0,
-    help: 'How much rotation a full wind-up gives you at takeoff.' },
-  { key: 'airControl',     label: 'Air control',        unit: '×',    min: 0,    max: 5,   step: 0.1,   def: 1.0,
-    help: 'Corrective torque from your arms in the air. 0 = rotation fixed at takeoff; 5 = arcade.' },
+  { key: 'spinRate',       label: 'Spin / flip speed', unit: '×',   min: 0.3,  max: 2.5, step: 0.05,  def: 1.0,
+    help: 'How fast you rotate in the air.' },
+  { key: 'airControl',     label: 'Air control',        unit: '×',    min: 0.2,  max: 3,   step: 0.1,   def: 1.0,
+    help: 'How quickly rotation starts and stops when you press/release.' },
   { key: 'simSpeed',       label: 'Time scale',         unit: '×',    min: 0.1,  max: 1.5, step: 0.05,  def: 1.0,
     help: 'Slow-mo for studying jumps.' },
 ];
 
-const KEY = 'heshsesh.settings.v1';
+const KEY = 'heshsesh.settings.v2';
 
 export function loadSettings() {
   const s = {};

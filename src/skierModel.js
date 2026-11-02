@@ -31,25 +31,28 @@ export const LINKS = [
   ['hip', 'lShoulder'], ['hip', 'rShoulder'],
 ];
 
-const lam = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
+// smooth-shaded clothing reads as fabric; flat shading is kept for hard gear
+const soft = (color) => new THREE.MeshLambertMaterial({ color });
+const hard = (color) => new THREE.MeshLambertMaterial({ color, flatShading: true });
 export const MATERIALS = {
-  jacket: lam(0x1d1f24),
-  jacketTrim: lam(0xff5a14),
-  zip: lam(0x4a4f57),
-  pants: lam(0x6f6a4f),        // washed olive, baggy
-  pantsDark: lam(0x55513b),
-  glove: lam(0x141518),
-  boot: lam(0xd9dde2),
-  bootDark: lam(0x2a2d33),
-  helmet: lam(0x2b2e33),
-  strap: lam(0xff5a14),
-  gaiter: lam(0x3a3f47),
-  lens: new THREE.MeshPhongMaterial({ color: 0xff8a1e, emissive: 0x3a1500, specular: 0xffffff, shininess: 90, flatShading: true }),
-  frame: lam(0x111214),
-  skiTop: lam(0xf3d23a),
-  skiBase: lam(0x15171a),
-  pole: lam(0x2b2e33),
-  basket: lam(0x111214),
+  jacket: soft(0x26292f),       // black puffer shell
+  jacketSeam: soft(0x15171b),
+  jacketTrim: soft(0xff5a14),   // blaze orange
+  zip: soft(0x4a4f57),
+  pants: soft(0xa88d5c),        // baggy tan cargo
+  pantsDark: soft(0x8a7148),
+  glove: soft(0x17181b),
+  boot: hard(0xe9ecef),
+  bootDark: hard(0x2a2d33),
+  helmet: new THREE.MeshPhongMaterial({ color: 0xeeeeea, shininess: 25, specular: 0x333333 }),
+  strap: soft(0x15171b),
+  gaiter: soft(0x1c1e22),
+  lens: new THREE.MeshPhongMaterial({ color: 0xff7a1a, emissive: 0x401800, specular: 0xffffff, shininess: 120 }),
+  frame: soft(0x111214),
+  skiTop: hard(0xf3d23a),
+  skiBase: hard(0x15171a),
+  pole: hard(0x2b2e33),
+  basket: hard(0x111214),
 };
 
 // --------------------------------------------------------------- geometry
@@ -90,81 +93,85 @@ function skiGeometry(len) {
 
 // Each builder returns a Group whose local +Y runs from joint A to joint B (nominal length)
 // and whose local +Z is the "front" hint (body front / ski top).
+const cap = (r, len, seg = 12) => new THREE.CapsuleGeometry(r, Math.max(0.001, len), 4, seg);
 const BUILDERS = {
   torso(L) {
     const g = new THREE.Group();
-    // oversized shell: hem hangs below the hips, boxy shoulders
-    g.add(new THREE.Mesh(lathe([[-0.2, 0.0], [-0.2, 0.215], [-0.05, 0.225], [0.2, 0.225], [L - 0.04, 0.245], [L + 0.03, 0.17], [L + 0.07, 0.0]], 1.12, 0.78, 8), MATERIALS.jacket));
-    // hem band, zip, chest pocket
-    g.add(new THREE.Mesh(lathe([[-0.2, 0.218], [-0.15, 0.222]], 1.13, 0.79, 8), MATERIALS.jacketTrim));
-    g.add(new THREE.Mesh(box(0.014, L + 0.1, 0.02, 0, (L - 0.12) / 2, 0.178), MATERIALS.zip));
-    g.add(new THREE.Mesh(box(0.11, 0.09, 0.03, -0.12, L - 0.17, 0.17), MATERIALS.jacketTrim));
+    // puffy shell: a squashed capsule whose bottom cap hangs over the hips
+    g.add(new THREE.Mesh(cap(0.21, L - 0.06).translate(0, L / 2 - 0.02, 0).scale(1.17, 1, 0.92), MATERIALS.jacket));
+    for (const y of [0.12, 0.27, 0.42]) { // quilted puffer seams
+      g.add(new THREE.Mesh(new THREE.TorusGeometry(0.212, 0.012, 5, 16).rotateX(Math.PI / 2).translate(0, y, 0).scale(1.17, 1, 0.92), MATERIALS.jacketSeam));
+    }
+    g.add(new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.03, 6, 16).rotateX(Math.PI / 2).translate(0, -0.16, 0).scale(1.17, 1, 0.92), MATERIALS.jacketTrim)); // hem band
+    g.add(new THREE.Mesh(box(0.014, L + 0.08, 0.02, 0, (L - 0.14) / 2, 0.198), MATERIALS.zip));
     // hood bunched behind the neck + tall collar
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.15, 7, 5, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(1.3, 0.75, 0.9).translate(0, L + 0.02, -0.11), MATERIALS.jacketTrim));
-    g.add(new THREE.Mesh(lathe([[L - 0.02, 0.13], [L + 0.1, 0.115]], 1, 1, 7), MATERIALS.jacket));
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8).scale(1.25, 0.7, 0.85).translate(0, L + 0.02, -0.13), MATERIALS.jacketTrim));
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 0.12, 12).translate(0, L + 0.03, 0), MATERIALS.jacket));
     return g;
   },
   head() {
     const g = new THREE.Group();
-    const c = 0.2; // head center sits at the end of the neck segment
-    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.115, 0.17, 8).translate(0, c - 0.06, 0), MATERIALS.gaiter));
-    // helmet shell + little brim
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.155, 9, 6, 0, Math.PI * 2, 0, Math.PI * 0.58).scale(1, 0.95, 1.08).translate(0, c - 0.005, -0.005), MATERIALS.helmet));
-    g.add(new THREE.Mesh(box(0.2, 0.02, 0.06, 0, c + 0.06, 0.15).rotateX(0), MATERIALS.helmet));
-    // goggle strap all the way round, then frame + mirrored lens across the front
-    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.158, 0.158, 0.045, 12, 1, true).translate(0, c + 0.0, 0), MATERIALS.strap));
-    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.168, 0.168, 0.085, 12, 1, true, -1.05, 2.1).translate(0, c + 0.0, 0), MATERIALS.frame));
-    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.174, 0.174, 0.068, 12, 1, true, -0.95, 1.9).translate(0, c + 0.0, 0), MATERIALS.lens));
+    const c = 0.21; // head center at the end of the neck segment
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.12, 0.16, 12).translate(0, c - 0.08, 0.005), MATERIALS.gaiter));
+    // big round helmet with a short brim
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.175, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62).scale(1, 0.98, 1.08).translate(0, c - 0.02, -0.01), MATERIALS.helmet));
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.012, 16, 1, false, -0.9, 1.8).translate(0, c + 0.075, 0.0), MATERIALS.helmet));
+    // goggles: strap round the helmet, chunky frame, mirrored orange lens
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.183, 0.183, 0.05, 20, 1, true).translate(0, c + 0.005, -0.01), MATERIALS.strap));
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.105, 20, 1, true, -1.15, 2.3).translate(0, c + 0.0, 0), MATERIALS.frame));
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.196, 0.196, 0.08, 20, 1, true, -1.02, 2.04).translate(0, c + 0.0, 0), MATERIALS.lens));
     return g;
   },
   pelvis(L) {
     const g = new THREE.Group();
-    // baggy seat: big squashed blob spanning the hips (segment runs right hip -> left hip)
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6).scale(0.8, 1.0, 0.85).translate(0, L / 2, -0.02), MATERIALS.pants));
+    // baggy seat spanning the hips (segment runs right hip -> left hip)
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10).scale(0.85, 1.05, 0.9).translate(0, L / 2, -0.02), MATERIALS.pants));
     return g;
   },
   thigh(L) {
     const g = new THREE.Group();
-    g.add(new THREE.Mesh(lathe([[-0.04, 0.12], [0.05, 0.145], [L * 0.6, 0.14], [L, 0.135], [L + 0.1, 0.11]], 1, 1.05, 8), MATERIALS.pants));
-    // cargo pocket on the outside of the thigh
-    const pocket = new THREE.Mesh(box(0.05, 0.16, 0.13, 0, L * 0.5, 0), MATERIALS.pantsDark);
+    g.add(new THREE.Mesh(cap(0.14, L).translate(0, L / 2, 0).scale(1, 1, 1.05), MATERIALS.pants));
+    // cargo pocket with flap on the outside of the thigh
+    const pocket = new THREE.Group();
+    pocket.add(new THREE.Mesh(box(0.05, 0.17, 0.14, 0, L * 0.5, 0), MATERIALS.pantsDark));
+    pocket.add(new THREE.Mesh(box(0.056, 0.035, 0.15, 0, L * 0.5 + 0.08, 0), MATERIALS.pants));
     pocket.userData.outside = true;
     g.add(pocket);
     return g;
   },
   shin(L) {
     const g = new THREE.Group();
-    // straight-leg baggy: flares and stacks over the boot
-    g.add(new THREE.Mesh(lathe([[-0.1, 0.11], [0, 0.132], [L * 0.45, 0.135], [L * 0.8, 0.155], [L + 0.02, 0.17], [L + 0.06, 0.165]], 1.05, 1.1, 8), MATERIALS.pants));
-    g.add(new THREE.Mesh(lathe([[L * 0.82, 0.158], [L * 0.86, 0.16]], 1.06, 1.11, 8), MATERIALS.pantsDark));
+    // straight-leg baggy: wide tube that flares and stacks over the boot
+    g.add(new THREE.Mesh(cap(0.13, L * 0.7).translate(0, L * 0.35, 0), MATERIALS.pants));
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.175, 0.32, 14).translate(0, L - 0.1, 0.005), MATERIALS.pants));
+    g.add(new THREE.Mesh(new THREE.TorusGeometry(0.168, 0.012, 5, 16).rotateX(Math.PI / 2).translate(0, L - 0.02, 0.005), MATERIALS.pantsDark));
     return g;
   },
   upperArm(L) {
     const g = new THREE.Group();
-    g.add(new THREE.Mesh(lathe([[-0.05, 0.08], [0.02, 0.095], [L, 0.085], [L + 0.04, 0.075]], 1, 1, 7), MATERIALS.jacket));
+    g.add(new THREE.Mesh(cap(0.09, L).translate(0, L / 2, 0), MATERIALS.jacket));
+    g.add(new THREE.Mesh(new THREE.TorusGeometry(0.092, 0.01, 5, 12).rotateX(Math.PI / 2).translate(0, L * 0.5, 0), MATERIALS.jacketSeam));
     return g;
   },
   forearm(L) {
     const g = new THREE.Group();
-    g.add(new THREE.Mesh(lathe([[-0.03, 0.08], [L * 0.75, 0.085], [L * 0.82, 0.09]], 1, 1, 7), MATERIALS.jacket));
-    g.add(new THREE.Mesh(lathe([[L * 0.8, 0.088], [L * 0.88, 0.088]], 1, 1, 7), MATERIALS.jacketTrim));
-    // chunky glove (mitt + gauntlet)
-    g.add(new THREE.Mesh(box(0.1, 0.13, 0.085, 0, L + 0.03, 0), MATERIALS.glove));
-    g.add(new THREE.Mesh(box(0.05, 0.06, 0.05, 0.05, L, 0.04), MATERIALS.glove));
+    g.add(new THREE.Mesh(cap(0.085, L * 0.8).translate(0, L * 0.4, 0), MATERIALS.jacket));
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.088, 0.09, 0.05, 12).translate(0, L * 0.82, 0), MATERIALS.jacketTrim));
+    // chunky mitt with thumb
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8).scale(1, 1.25, 0.85).translate(0, L + 0.03, 0), MATERIALS.glove));
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6).scale(1, 1.4, 1).translate(0.05, L, 0.04), MATERIALS.glove));
     return g;
   },
   ski(L) {
     const g = new THREE.Group();
-    const top = new THREE.Mesh(skiGeometry(L), MATERIALS.skiTop);
-    g.add(top);
-    const base = new THREE.Mesh(skiGeometry(L).scale(1.02, 1, 0.35), MATERIALS.skiBase);
-    g.add(base);
+    g.add(new THREE.Mesh(skiGeometry(L), MATERIALS.skiTop));
+    g.add(new THREE.Mesh(skiGeometry(L).scale(1.02, 1, 0.35), MATERIALS.skiBase));
     // boot + binding at the mount point (foot sits 0.75 m from the tail)
     const m = 0.75;
-    g.add(new THREE.Mesh(box(0.075, 0.34, 0.03, 0, m, 0.035), MATERIALS.bootDark));     // binding
-    g.add(new THREE.Mesh(box(0.115, 0.31, 0.11, 0, m - 0.01, 0.1), MATERIALS.boot));     // shell
-    g.add(new THREE.Mesh(box(0.12, 0.13, 0.2, 0, m - 0.04, 0.24), MATERIALS.boot));      // cuff
-    g.add(new THREE.Mesh(box(0.125, 0.025, 0.21, 0, m - 0.04, 0.2), MATERIALS.bootDark)); // power strap
+    g.add(new THREE.Mesh(box(0.075, 0.34, 0.03, 0, m, 0.035), MATERIALS.bootDark));
+    g.add(new THREE.Mesh(box(0.115, 0.31, 0.11, 0, m - 0.01, 0.1), MATERIALS.boot));
+    g.add(new THREE.Mesh(box(0.12, 0.13, 0.2, 0, m - 0.04, 0.24), MATERIALS.boot));
+    g.add(new THREE.Mesh(box(0.125, 0.025, 0.21, 0, m - 0.04, 0.2), MATERIALS.bootDark));
     return g;
   },
 };
@@ -199,7 +206,7 @@ export class Body {
     this.segs = SEGMENTS.map(([name, , , L]) => {
       const g = BUILDERS[KIND[name]](L);
       // pockets go on the outside of each leg
-      if (name === 'thighL' || name === 'thighR') g.children.forEach((c) => { if (c.userData.outside) c.position.x = name === 'thighL' ? 0.14 : -0.14; });
+      if (name === 'thighL' || name === 'thighR') g.children.forEach((c) => { if (c.userData.outside) c.position.x = name === 'thighL' ? 0.135 : -0.135; });
       g.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
       this.root.add(g);
       return g;
@@ -323,7 +330,7 @@ export class SkierModel {
   // Local-space pose. x>0 is the skier's LEFT, y up, z forward.
   pose(crouch, tuck, grab, wind) {
     const P = this.joints;
-    const hipH = 0.95 - 0.3 * crouch - 0.33 * tuck - 0.14 * grab;
+    const hipH = 0.88 - 0.28 * crouch - 0.3 * tuck - 0.14 * grab;
     const hipZ = -0.1 - 0.12 * tuck - 0.06 * crouch;
     const stance = 0.14; // a bit wider than hip width: athletic park stance
     P[J.lFoot].set(stance, 0.12, 0); P[J.rFoot].set(-stance, 0.12, 0);
