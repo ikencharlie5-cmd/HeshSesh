@@ -39,8 +39,10 @@ export const MATERIALS = {
   jacketSeam: soft(0x15171b),
   jacketTrim: soft(0xff5a14),   // blaze orange
   zip: soft(0x4a4f57),
-  pants: soft(0xa88d5c),        // baggy tan cargo
-  pantsDark: soft(0x8a7148),
+  pants: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }), // baggy tan cargo, shaded folds
+  pantsDark: soft(0x7d6640),
+  pantsSeam: soft(0x6a5636),
+  button: soft(0x2a2a2a),
   glove: soft(0x17181b),
   boot: hard(0xe9ecef),
   bootDark: hard(0x2a2d33),
@@ -93,16 +95,80 @@ function skiGeometry(len) {
 
 // Each builder returns a Group whose local +Y runs from joint A to joint B (nominal length)
 // and whose local +Z is the "front" hint (body front / ski top).
+// ------------------------------------------------------------- fabric
+const PANTS = new THREE.Color(0xa88d5c);
+const sm = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+
+// A cloth tube hung along +Y (down the leg). radius(t) gives the silhouette,
+// fold(t, θ) pushes the surface in/out for wrinkles, drop(t, θ) lets a hem
+// hang lower at the back. Vertex colors darken the fold valleys so the folds
+// read as fabric instead of a smooth pipe.
+function fabricTube(L, { t0, t1, rings, radius, fold, drop = () => 0, sx = 1, sz = 1, zoff = () => 0, hem = false }) {
+  const seg = 18, pos = [], col = [], idx = [];
+  const c = new THREE.Color();
+  const ringCount = rings + (hem ? 1 : 0);
+  for (let i = 0; i <= rings; i++) {
+    const t = t0 + (t1 - t0) * (i / rings);
+    for (let j = 0; j <= seg; j++) {
+      const th = (j / seg) * Math.PI * 2;
+      const f = fold(t, th);
+      const r = radius(t) * (1 + f);
+      pos.push(Math.sin(th) * r * sx, t * L + drop(t, th), Math.cos(th) * r * sz + zoff(t));
+      const back = Math.max(0, -Math.cos(th)) * 0.06;
+      c.copy(PANTS).multiplyScalar(0.8 + 2.2 * f + 0.12 - back);
+      col.push(c.r, c.g, c.b);
+    }
+  }
+  if (hem) { // turn the bottom edge inward so the cuff has thickness
+    const t = t1;
+    for (let j = 0; j <= seg; j++) {
+      const th = (j / seg) * Math.PI * 2;
+      const r = radius(t) * 0.82;
+      pos.push(Math.sin(th) * r * sx, t * L + drop(t, th) - 0.01, Math.cos(th) * r * sz + zoff(t));
+      c.copy(PANTS).multiplyScalar(0.55); col.push(c.r, c.g, c.b);
+    }
+  }
+  for (let i = 0; i < ringCount; i++) for (let j = 0; j < seg; j++) {
+    const a = i * (seg + 1) + j, b = a + seg + 1;
+    idx.push(a, b, a + 1, a + 1, b, b + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+function tint(geo, k) {
+  const n = geo.attributes.position.count, a = new Float32Array(n * 3);
+  const c = PANTS.clone().multiplyScalar(k);
+  for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+  geo.setAttribute('color', new THREE.BufferAttribute(a, 3));
+  return geo;
+}
+// cargo pocket on the outside of the thigh: bellows body, flap, snap, side pleat
+function cargoPocket(side, r, y) {
+  const p = new THREE.Group();
+  const x = side * (r + 0.012);
+  p.add(new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.17, 0.15).translate(x, y, 0.005), MATERIALS.pantsDark));
+  p.add(new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.05, 0.16).translate(x + side * 0.005, y - 0.09, 0.005), MATERIALS.pantsDark));
+  p.add(new THREE.Mesh(new THREE.SphereGeometry(0.011, 6, 4).translate(x + side * 0.03, y - 0.085, 0.005), MATERIALS.button));
+  p.add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.008).translate(x, y + 0.005, 0.078), MATERIALS.pantsSeam));
+  p.rotation.y = side * 0.08;
+  return p;
+}
+
 const cap = (r, len, seg = 12) => new THREE.CapsuleGeometry(r, Math.max(0.001, len), 4, seg);
 const BUILDERS = {
   torso(L) {
     const g = new THREE.Group();
     // puffy shell: a squashed capsule whose bottom cap hangs over the hips
-    g.add(new THREE.Mesh(cap(0.21, L - 0.06).translate(0, L / 2 - 0.02, 0).scale(1.17, 1, 0.92), MATERIALS.jacket));
-    for (const y of [0.12, 0.27, 0.42]) { // quilted puffer seams
-      g.add(new THREE.Mesh(new THREE.TorusGeometry(0.212, 0.012, 5, 16).rotateX(Math.PI / 2).translate(0, y, 0).scale(1.17, 1, 0.92), MATERIALS.jacketSeam));
+    // straight-cut puffer: long body with a flat hem that hangs over the seat
+    g.add(new THREE.Mesh(lathe([[-0.27, 0], [-0.27, 0.212], [-0.2, 0.218], [L - 0.2, 0.218], [L - 0.08, 0.205], [L + 0.0, 0.16], [L + 0.05, 0]], 1.17, 0.95, 18), MATERIALS.jacket));
+    for (const y of [-0.1, 0.06, 0.22]) { // quilted puffer seams
+      g.add(new THREE.Mesh(new THREE.TorusGeometry(0.219, 0.01, 5, 18).rotateX(Math.PI / 2).translate(0, y, 0).scale(1.17, 1, 0.95), MATERIALS.jacketSeam));
     }
-    g.add(new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.03, 6, 16).rotateX(Math.PI / 2).translate(0, -0.16, 0).scale(1.17, 1, 0.92), MATERIALS.jacketTrim)); // hem band
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.222, 0.222, 0.05, 18, 1, true).translate(0, -0.245, 0).scale(1.17, 1, 0.95), MATERIALS.jacketTrim)); // hem band
     g.add(new THREE.Mesh(box(0.014, L + 0.08, 0.02, 0, (L - 0.14) / 2, 0.198), MATERIALS.zip));
     // hood bunched behind the neck + tall collar
     g.add(new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8).scale(1.25, 0.7, 0.85).translate(0, L + 0.02, -0.13), MATERIALS.jacketTrim));
@@ -123,28 +189,43 @@ const BUILDERS = {
     return g;
   },
   pelvis(L) {
+    // baggy dropped seat. In this group +Y runs right hip -> left hip and +X points DOWN.
     const g = new THREE.Group();
-    // baggy seat spanning the hips (segment runs right hip -> left hip)
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10).scale(0.85, 1.05, 0.9).translate(0, L / 2, -0.02), MATERIALS.pants));
+    g.add(new THREE.Mesh(tint(new THREE.SphereGeometry(0.18, 18, 14).scale(1.0, 1.0, 0.85).translate(0.07, L / 2, 0.02), 0.9), MATERIALS.pants));
+    // low crotch bridging the legs
+    g.add(new THREE.Mesh(tint(new THREE.SphereGeometry(0.12, 14, 10).scale(1.2, 1.45, 0.9).translate(0.18, L / 2, 0.02), 0.78), MATERIALS.pants));
     return g;
   },
-  thigh(L) {
+  thigh(L, side) {
+    // +Y runs down the leg, +X is the skier's right
     const g = new THREE.Group();
-    g.add(new THREE.Mesh(cap(0.14, L).translate(0, L / 2, 0).scale(1, 1, 1.05), MATERIALS.pants));
-    // cargo pocket with flap on the outside of the thigh
-    const pocket = new THREE.Group();
-    pocket.add(new THREE.Mesh(box(0.05, 0.17, 0.14, 0, L * 0.5, 0), MATERIALS.pantsDark));
-    pocket.add(new THREE.Mesh(box(0.056, 0.035, 0.15, 0, L * 0.5 + 0.08, 0), MATERIALS.pants));
-    pocket.userData.outside = true;
-    g.add(pocket);
+    g.add(new THREE.Mesh(fabricTube(L, {
+      t0: -0.18, t1: 1.14, rings: 26,
+      radius: (t) => (0.158 - 0.016 * sm(t)) * Math.sqrt(Math.max(0.02, 1 - sm((t - 1.0) / 0.14) * 0.98)),
+      // loose fabric everywhere, diagonal creases bunching behind and above the knee
+      fold: (t, th) => 0.025 * Math.sin(5 * th - 3 * t) + 0.045 * Math.sin(3 * th + 11 * t) * sm((t - 0.5) / 0.4)
+        + 0.03 * Math.sin(2 * th + 6) * sm((t - 0.85) / 0.2),
+      sx: 1.0, sz: 1.08, zoff: (t) => 0.012 * sm((t - 0.6) / 0.4),
+    }), MATERIALS.pants));
+    g.add(cargoPocket(side, 0.15, L * 0.5));
+    // outside seam
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.008, L * 0.95, 0.012).translate(side * 0.157, L * 0.47, 0), MATERIALS.pantsSeam));
     return g;
   },
-  shin(L) {
+  shin(L, side) {
     const g = new THREE.Group();
-    // straight-leg baggy: wide tube that flares and stacks over the boot
-    g.add(new THREE.Mesh(cap(0.13, L * 0.7).translate(0, L * 0.35, 0), MATERIALS.pants));
-    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.175, 0.32, 14).translate(0, L - 0.1, 0.005), MATERIALS.pants));
-    g.add(new THREE.Mesh(new THREE.TorusGeometry(0.168, 0.012, 5, 16).rotateX(Math.PI / 2).translate(0, L - 0.02, 0.005), MATERIALS.pantsDark));
+    g.add(new THREE.Mesh(fabricTube(L, {
+      t0: -0.12, t1: 1.16, rings: 30, hem: true,
+      // straight wide leg that keeps getting wider down to the boot
+      radius: (t) => (0.142 + 0.02 * sm(t / 0.5) + 0.03 * sm((t - 0.5) / 0.45) + 0.012 * sm((t - 1.0) / 0.16)) * (1 - 0.25 * sm(-t / 0.12)),
+      // stacking: the extra length piles up in wavy rings over the boot
+      fold: (t, th) => 0.022 * Math.sin(4 * th + 7 * t)
+        + 0.075 * Math.pow(0.5 + 0.5 * Math.sin(t * L * 40 + 1.6 * Math.sin(2 * th + t * 3)), 2) * sm((t - 0.6) / 0.25) * (1 - 0.6 * sm((t - 1.08) / 0.08)),
+      // hem drags lower at the heel
+      drop: (t, th) => 0.06 * Math.max(0, -Math.cos(th)) * sm((t - 1.0) / 0.16),
+      sx: 1.02, sz: 1.1, zoff: (t) => 0.01 * sm((t - 0.7) / 0.4),
+    }), MATERIALS.pants));
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.008, L * 0.7, 0.012).translate(side * 0.16, L * 0.35, 0), MATERIALS.pantsSeam));
     return g;
   },
   upperArm(L) {
@@ -170,8 +251,8 @@ const BUILDERS = {
     const m = 0.75;
     g.add(new THREE.Mesh(box(0.075, 0.34, 0.03, 0, m, 0.035), MATERIALS.bootDark));
     g.add(new THREE.Mesh(box(0.115, 0.31, 0.11, 0, m - 0.01, 0.1), MATERIALS.boot));
-    g.add(new THREE.Mesh(box(0.12, 0.13, 0.2, 0, m - 0.04, 0.24), MATERIALS.boot));
-    g.add(new THREE.Mesh(box(0.125, 0.025, 0.21, 0, m - 0.04, 0.2), MATERIALS.bootDark));
+    g.add(new THREE.Mesh(box(0.115, 0.12, 0.15, 0, m - 0.02, 0.21), MATERIALS.boot));
+    g.add(new THREE.Mesh(box(0.12, 0.025, 0.16, 0, m - 0.02, 0.19), MATERIALS.bootDark));
     return g;
   },
 };
@@ -204,9 +285,9 @@ export class Body {
   constructor(parent) {
     this.root = new THREE.Group();
     this.segs = SEGMENTS.map(([name, , , L]) => {
-      const g = BUILDERS[KIND[name]](L);
-      // pockets go on the outside of each leg
-      if (name === 'thighL' || name === 'thighR') g.children.forEach((c) => { if (c.userData.outside) c.position.x = name === 'thighL' ? 0.135 : -0.135; });
+      // in a leg group +X is the skier's right, so the outside of the left leg is -X
+      const side = name.endsWith('L') ? -1 : 1;
+      const g = BUILDERS[KIND[name]](L, side);
       g.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
       this.root.add(g);
       return g;
